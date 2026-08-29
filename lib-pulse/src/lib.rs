@@ -5,11 +5,15 @@
 //! [`pulse`]; each supported package manager is a [`Backend`] living in its
 //! own module.
 
+pub mod archive;
 pub mod backend;
+pub mod config;
 pub mod db;
 pub mod networking;
 pub mod paths;
+pub mod platform;
 pub mod process;
+pub mod update;
 
 pub mod apt;
 pub mod direct;

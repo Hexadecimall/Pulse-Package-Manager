@@ -15,6 +15,10 @@ pub struct InstallOptions {
     pub backend: Option<String>,
     /// Override the installed binary's name (direct installs only).
     pub name: Option<String>,
+    /// Operate in the user's home (`~/.pulse`) rather than system paths.
+    /// Direct installs already live there; this reserves the behaviour for the
+    /// system backends once they gain user-scoped installs.
+    pub as_user: bool,
 }
 
 /// Whether a target looks like a direct install (a URL or an `owner/repo`

@@ -40,6 +40,12 @@ pulse backends              # show which managers were detected here
 pulse doctor                # check the environment and report problems
 ```
 
+Two global options:
+
+- `--as-user` keeps everything in your home (`~/.pulse`) and never touches
+  system paths or asks for root.
+- `--update [stable|beta|dev]` updates Pulse itself (see below).
+
 ## How it's laid out
 
 Pulse keeps its state in a single directory, `~/.pulse`:
@@ -59,7 +65,34 @@ The project itself is a small workspace:
 - **`pulse`** — the command-line front end. A thin layer that parses arguments
   and calls into `lib-pulse`.
 
-## Building
+## Installing
+
+Grab a prebuilt binary — no build step:
+
+```
+curl -fsSL https://raw.githubusercontent.com/Hexadecimall/Pulse-Package-Manager/main/install.sh | bash
+```
+
+By default this installs to `/usr/local/bin` **setuid-root**, so Pulse can drive
+system package managers (apt, dnf, pacman) without a password. Pass `--as-user`
+to install into `~/.pulse/bin` with no root at all. On Windows, run
+`install.ps1` instead (elevation is handled by UAC).
+
+## Updating
+
+Pulse updates itself from its own releases — three channels:
+
+```
+pulse --update           # your current channel (stable by default)
+pulse --update stable    # thoroughly tested, fastest, most secure
+pulse --update beta      # confirmed features, lightly tested
+pulse --update dev       # newest, experimental
+```
+
+`--as-user` works here too: `pulse --update dev --as-user` updates the copy in
+`~/.pulse/bin` instead of the system one.
+
+## Building from source
 
 ```
 git clone https://github.com/Hexadecimall/Pulse-Package-Manager

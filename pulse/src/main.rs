@@ -1,7 +1,9 @@
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use lib_pulse::pulse::InstallOptions;
+use lib_pulse::update::{self, Channel};
 use lib_pulse::{Registry, paths, pulse};
+use std::str::FromStr;
 
 #[derive(Parser)]
 #[command(
@@ -10,8 +12,16 @@ use lib_pulse::{Registry, paths, pulse};
     about = "One command to install software on any platform"
 )]
 struct Cli {
+    /// Update Pulse itself. Optionally pick a channel: stable, beta, or dev
+    #[arg(long, value_name = "CHANNEL", num_args = 0..=1, default_missing_value = "")]
+    update: Option<String>,
+
+    /// Operate in your home (~/.pulse), never touching system paths or needing root
+    #[arg(long, global = true)]
+    as_user: bool,
+
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 
 #[derive(Subcommand)]
@@ -48,7 +58,40 @@ enum Command {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    match cli.command {
+
+    // `--update [channel]` is a top-level action, separate from the package
+    // `update` subcommand (which updates installed packages).
+    if let Some(channel_arg) = cli.update {
+        let channel = if channel_arg.is_empty() {
+            None
+        } else {
+            Some(Channel::from_str(&channel_arg)?)
+        };
+        let outcome = update::self_update(channel, cli.as_user)?;
+        if outcome.already_current {
+            println!(
+                "Pulse is already up to date on {} ({}).",
+                outcome.channel.as_str(),
+                outcome.tag
+            );
+        } else {
+            println!(
+                "Updated Pulse to {} [{}] at {}",
+                outcome.tag,
+                outcome.channel.as_str(),
+                outcome.path.display()
+            );
+        }
+        return Ok(());
+    }
+
+    let Some(command) = cli.command else {
+        Cli::command().print_help()?;
+        println!();
+        return Ok(());
+    };
+
+    match command {
         Command::Install {
             target,
             direct,
@@ -59,6 +102,7 @@ fn main() -> Result<()> {
                 direct,
                 backend,
                 name,
+                as_user: cli.as_user,
             };
             let pkg = pulse::install(&target, &opts)?;
             let version = pkg.version.as_deref().unwrap_or("");
