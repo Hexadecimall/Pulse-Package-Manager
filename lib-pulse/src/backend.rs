@@ -1,0 +1,126 @@
+//! The [`Backend`] abstraction and the [`Registry`] that selects between
+//! backends for the current machine.
+
+use crate::apt::Apt;
+use crate::db::InstalledPackage;
+use crate::direct::Direct;
+use crate::dnf::Dnf;
+use crate::homebrew::Homebrew;
+use crate::pacman::Pacman;
+use crate::winget::Winget;
+use anyhow::Result;
+
+/// A package as surfaced by a backend's search.
+#[derive(Debug, Clone)]
+pub struct Package {
+    pub name: String,
+    pub version: Option<String>,
+    pub description: Option<String>,
+    /// Identifier of the backend this result came from, e.g. `"homebrew"`.
+    pub source: String,
+}
+
+/// A source Pulse can install software from — a system package manager, or the
+/// direct-binary installer. Every backend implements the same handful of
+/// operations, so the front end never has to special-case one.
+pub trait Backend {
+    /// Stable identifier, e.g. `"homebrew"`, `"apt"`, `"direct"`.
+    fn name(&self) -> &'static str;
+
+    /// Whether this backend can actually run on the current machine.
+    fn is_available(&self) -> bool;
+
+    fn search(&self, query: &str) -> Result<Vec<Package>>;
+
+    /// Install a package and return the record to persist for it.
+    fn install(&self, package: &str) -> Result<InstalledPackage>;
+
+    fn remove(&self, package: &str) -> Result<()>;
+
+    /// Update a package to the latest version. Defaults to reinstalling, which
+    /// is correct for backends whose install already fetches the latest;
+    /// managers with a dedicated upgrade command override this.
+    fn update(&self, package: &str) -> Result<InstalledPackage> {
+        self.install(package)
+    }
+}
+
+/// Look up an executable on `PATH` without spawning a process — the native
+/// equivalent of `which`, used for backend detection. On Windows an `.exe`
+/// suffix is also considered.
+pub fn command_exists(cmd: &str) -> bool {
+    let Some(path) = std::env::var_os("PATH") else {
+        return false;
+    };
+    std::env::split_paths(&path).any(|dir| {
+        let candidate = dir.join(cmd);
+        candidate.is_file() || candidate.with_extension("exe").is_file()
+    })
+}
+
+/// The set of backends Pulse knows about, in preference order.
+pub struct Registry {
+    backends: Vec<Box<dyn Backend>>,
+}
+
+impl Registry {
+    /// Every backend Pulse ships, whether or not it's usable here.
+    pub fn all() -> Self {
+        Registry {
+            backends: vec![
+                Box::new(Homebrew),
+                Box::new(Apt),
+                Box::new(Dnf),
+                Box::new(Pacman),
+                Box::new(Winget),
+            ],
+        }
+    }
+
+    /// All known backends, regardless of availability.
+    pub fn backends(&self) -> Vec<&dyn Backend> {
+        self.backends.iter().map(Box::as_ref).collect()
+    }
+
+    /// Only the backends usable on this machine right now.
+    pub fn available(&self) -> Vec<&dyn Backend> {
+        self.backends
+            .iter()
+            .map(Box::as_ref)
+            .filter(|b| b.is_available())
+            .collect()
+    }
+
+    /// The preferred system manager for this machine — the first available
+    /// one. The direct-binary installer is intentionally excluded; reach it
+    /// with [`Registry::direct`].
+    pub fn primary(&self) -> Option<&dyn Backend> {
+        self.available().into_iter().next()
+    }
+
+    /// The direct-binary installer, which is always available.
+    pub fn direct(&self) -> Direct {
+        Direct
+    }
+
+    /// Look up a specific backend by its identifier, including `"direct"`.
+    pub fn get(&self, name: &str) -> Option<Box<dyn Backend>> {
+        if name == "direct" {
+            return Some(Box::new(Direct));
+        }
+        match name {
+            "homebrew" => Some(Box::new(Homebrew)),
+            "apt" => Some(Box::new(Apt)),
+            "dnf" => Some(Box::new(Dnf)),
+            "pacman" => Some(Box::new(Pacman)),
+            "winget" => Some(Box::new(Winget)),
+            _ => None,
+        }
+    }
+}
+
+impl Default for Registry {
+    fn default() -> Self {
+        Self::all()
+    }
+}
