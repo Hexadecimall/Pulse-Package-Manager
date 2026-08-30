@@ -12,6 +12,11 @@ pub struct Config {
     /// the installer.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub install_mode: Option<String>,
+    /// The default platform (package source, e.g. `"homebrew"`) that a plain
+    /// `pulse install <name>` uses when no `--platform` is given. Unset means
+    /// Pulse picks the one native to this machine.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_platform: Option<String>,
     /// The update channel last used by `--update`: `"stable"`, `"beta"`, or
     /// `"dev"`. Lets a bare `--update` reuse the channel you're on.
     #[serde(skip_serializing_if = "Option::is_none")]

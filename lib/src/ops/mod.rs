@@ -3,16 +3,17 @@
 //! This is the surface the command-line front end calls into.
 
 use crate::backend::{Package, Registry};
+use crate::config::Config;
 use crate::db::{Db, InstalledPackage};
 use anyhow::{Context, Result};
 
-/// Options controlling how [`install`] chooses a backend.
+/// Options controlling how [`install`] chooses a platform.
 #[derive(Debug, Default)]
 pub struct InstallOptions {
     /// Force the direct-binary installer regardless of the target's shape.
     pub direct: bool,
-    /// Force a specific backend by name (e.g. `"homebrew"`, `"direct"`).
-    pub backend: Option<String>,
+    /// Force a specific platform by name (e.g. `"homebrew"`, `"direct"`).
+    pub platform: Option<String>,
     /// Override the installed binary's name (direct installs only).
     pub name: Option<String>,
 }
@@ -24,24 +25,33 @@ fn looks_direct(target: &str) -> bool {
 }
 
 /// Install a package, recording it in the database on success.
+///
+/// Platform choice: an explicit `--platform`, else the configured
+/// `default_platform`, else the one native to this machine. A URL or
+/// `owner/repo` target (or `--direct`) always uses the direct installer.
 pub fn install(target: &str, opts: &InstallOptions) -> Result<InstalledPackage> {
     let registry = Registry::all();
 
-    let record = if opts.backend.as_deref() == Some("direct")
+    let record = if opts.platform.as_deref() == Some("direct")
         || opts.direct
-        || (opts.backend.is_none() && looks_direct(target))
+        || (opts.platform.is_none() && looks_direct(target))
     {
         registry.direct().install_spec(target, opts.name.as_deref())?
-    } else if let Some(name) = &opts.backend {
-        let backend = registry
+    } else if let Some(name) = &opts.platform {
+        let platform = registry
             .get(name)
-            .with_context(|| format!("unknown backend '{name}'"))?;
-        backend.install(target)?
+            .with_context(|| format!("unknown platform '{name}'"))?;
+        platform.install(target)?
+    } else if let Some(name) = Config::load().ok().and_then(|c| c.default_platform) {
+        let platform = registry
+            .get(&name)
+            .with_context(|| format!("configured default-platform '{name}' is unknown"))?;
+        platform.install(target)?
     } else {
-        let backend = registry
+        let platform = registry
             .primary()
-            .context("no supported package manager was detected on this system")?;
-        backend.install(target)?
+            .context("no package source was detected on this system")?;
+        platform.install(target)?
     };
 
     let mut db = Db::load()?;

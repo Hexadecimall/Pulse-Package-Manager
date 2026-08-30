@@ -38,9 +38,9 @@ enum Command {
         /// Force the direct-binary installer
         #[arg(long)]
         direct: bool,
-        /// Use a specific backend (e.g. homebrew, apt, direct)
+        /// Use a specific platform (e.g. homebrew, apt, macports, direct)
         #[arg(long)]
-        backend: Option<String>,
+        platform: Option<String>,
         /// Name for the installed binary (direct installs only)
         #[arg(long)]
         name: Option<String>,
@@ -55,8 +55,8 @@ enum Command {
     Update { package: Option<String> },
     /// Show details about a package
     Info { package: String },
-    /// Show which package managers were detected on this machine
-    Backends,
+    /// Show which platforms (package sources) were detected on this machine
+    Platforms,
     /// Check the environment and report problems
     Doctor,
     /// View or change Pulse's settings (mode, channel)
@@ -128,12 +128,12 @@ fn main() -> Result<()> {
         Command::Install {
             target,
             direct,
-            backend,
+            platform,
             name,
         } => {
             let opts = InstallOptions {
                 direct,
-                backend,
+                platform,
                 name,
             };
             let pkg = ops::install(&target, &opts)?;
@@ -197,7 +197,7 @@ fn main() -> Result<()> {
             }
             None => println!("Pulse has no record of '{package}'."),
         },
-        Command::Backends => {
+        Command::Platforms => {
             let registry = Registry::all();
             for b in registry.backends() {
                 let mark = if b.is_available() {
@@ -221,7 +221,7 @@ fn main() -> Result<()> {
                 println!("No native OS source detected. Direct and registry installs still work.");
             } else {
                 let names: Vec<&str> = available.iter().map(|b| b.name()).collect();
-                println!("Detected sources: {}", names.join(", "));
+                println!("Detected platforms: {}", names.join(", "));
             }
         }
         Command::Settings { key, value } => settings(key, value)?,
@@ -237,8 +237,9 @@ fn settings(key: Option<String>, value: Option<String>) -> Result<()> {
 
     let Some(key) = key else {
         // No key: show everything.
-        println!("mode:    {}", cfg.install_mode.as_deref().unwrap_or("(default: user)"));
-        println!("channel: {}", cfg.channel.as_deref().unwrap_or("(default: stable)"));
+        println!("mode:             {}", cfg.install_mode.as_deref().unwrap_or("(default: user)"));
+        println!("channel:          {}", cfg.channel.as_deref().unwrap_or("(default: stable)"));
+        println!("default-platform: {}", cfg.default_platform.as_deref().unwrap_or("(default: native)"));
         return Ok(());
     };
 
@@ -246,6 +247,9 @@ fn settings(key: Option<String>, value: Option<String>) -> Result<()> {
         // Read a single setting.
         ("mode", None) => println!("{}", cfg.install_mode.as_deref().unwrap_or("(default: user)")),
         ("channel", None) => println!("{}", cfg.channel.as_deref().unwrap_or("(default: stable)")),
+        ("default-platform", None) => {
+            println!("{}", cfg.default_platform.as_deref().unwrap_or("(default: native)"))
+        }
         // Change a setting.
         ("mode", Some(v)) => {
             if v != "user" && v != "system" {
@@ -263,7 +267,19 @@ fn settings(key: Option<String>, value: Option<String>) -> Result<()> {
             cfg.save()?;
             println!("channel set to {v}");
         }
-        (other, _) => anyhow::bail!("unknown setting '{other}' (known: mode, channel)"),
+        ("default-platform", Some(v)) => {
+            if pulse::Registry::all().get(&v).is_none() {
+                anyhow::bail!(
+                    "unknown platform '{v}' (see `pulse platforms`; or direct / registry)"
+                );
+            }
+            cfg.default_platform = Some(v.clone());
+            cfg.save()?;
+            println!("default-platform set to {v}");
+        }
+        (other, _) => {
+            anyhow::bail!("unknown setting '{other}' (known: mode, channel, default-platform)")
+        }
     }
     Ok(())
 }

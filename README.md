@@ -17,7 +17,7 @@ place.
 
 ## What it does
 
-- **Speaks every backend.** apt, dnf, pacman, winget, Homebrew — detected
+- **Speaks every platform.** apt, dnf, pacman, winget, Homebrew — detected
   automatically, used transparently. You run `pulse install`, Pulse picks the
   right tool for the platform you're on.
 - **Installs binaries directly.** Pull a release straight from where it lives,
@@ -30,14 +30,16 @@ place.
 ## Usage
 
 ```
-pulse install <package>     # install, via a system manager or directly
-pulse remove  <package>     # uninstall
-pulse search  <query>       # search across available backends
-pulse list                  # everything Pulse has installed
-pulse update  [package]     # update one package, or all of them
-pulse info    <package>     # details about a package
-pulse backends              # show which managers were detected here
-pulse doctor                # check the environment and report problems
+pulse install <package>          # install, via a platform or directly
+pulse uninstall <package>        # uninstall
+pulse search <query>             # search across available platforms
+pulse list                       # everything Pulse has installed
+pulse update [package]           # update one package, or all of them
+pulse info <package>             # details about a package
+pulse platforms                  # show which platforms were detected here
+pulse settings [key] [value]     # view/change mode, channel, default-platform
+pulse dev new|check              # author/validate registry manifests
+pulse doctor                     # check the environment and report problems
 ```
 
 Two global options:
@@ -113,8 +115,8 @@ The binary lands at `target/release/pulse`.
 
 ## Status
 
-Early, and moving fast. Backend detection, the command surface, and the state
-directory are in place; individual backends are being filled in one at a time.
+Early, and moving fast. Platform detection, the command surface, and the state
+directory are in place; individual platform clients are being filled in one at a time.
 Expect the set of supported managers to grow.
 
 ## License
