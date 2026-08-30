@@ -10,7 +10,7 @@
 //! with no `sudo`; `--as-user` instead installs into `~/.pulse/bin`.
 
 use crate::config::Config;
-use crate::{archive, networking, paths, platform, process};
+use crate::{archive, networking, paths, platform};
 use anyhow::{Context, Result, bail};
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -128,13 +128,7 @@ pub fn self_update(channel: Option<Channel>) -> Result<UpdateOutcome> {
         download_path.clone()
     };
 
-    // Stage next to the destination, then rename over it — renaming over a
-    // running executable is fine on Unix, and keeps the swap atomic.
-    let staged = dest.with_extension("new");
-    std::fs::copy(&binary_src, &staged)
-        .with_context(|| format!("staging new binary at {}", staged.display()))?;
-    set_install_mode(&staged, as_user)?;
-    std::fs::rename(&staged, &dest).with_context(|| format!("replacing {}", dest.display()))?;
+    place_binary(&binary_src, &dest)?;
     let _ = std::fs::remove_dir_all(&work);
 
     // Remember the channel and tag for next time.
@@ -185,24 +179,61 @@ fn resolve_release(channel: Channel) -> Result<serde_json::Value> {
     }
 }
 
-/// Give the freshly-installed binary the right permissions: a system install
-/// keeps the setuid-root bit (so it stays password-less); an `--as-user`
-/// install is a plain executable.
+/// Install the new binary over `dest`.
+///
+/// If the destination directory is writable, copy in place (atomic rename
+/// within the dir). Otherwise — a system install running as a normal user —
+/// hand the copy to the setuid helper, so self-updating a system install needs
+/// no `sudo`.
+fn place_binary(src: &std::path::Path, dest: &std::path::Path) -> Result<()> {
+    let parent = dest
+        .parent()
+        .context("destination has no parent directory")?;
+
+    if paths::is_writable(parent) {
+        let tmp = dest.with_extension("pulse-new");
+        std::fs::copy(src, &tmp).with_context(|| format!("staging at {}", tmp.display()))?;
+        set_executable(&tmp)?;
+        std::fs::rename(&tmp, dest).with_context(|| format!("replacing {}", dest.display()))?;
+        return Ok(());
+    }
+
+    #[cfg(unix)]
+    {
+        let helper = paths::helper_path();
+        if helper.exists() {
+            let status = std::process::Command::new(&helper)
+                .arg("install")
+                .arg(src)
+                .arg(dest)
+                .status()
+                .with_context(|| format!("running the setuid helper at {}", helper.display()))?;
+            if status.success() {
+                return Ok(());
+            }
+            bail!(
+                "the setuid helper failed to install the update to {}",
+                dest.display()
+            );
+        }
+    }
+
+    bail!(
+        "cannot write {} and no setuid helper is installed — re-run as root, \
+         or use `--as-user`",
+        dest.display()
+    );
+}
+
 #[cfg(unix)]
-fn set_install_mode(path: &std::path::Path, as_user: bool) -> Result<()> {
+fn set_executable(path: &std::path::Path) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
-    // 4755 = setuid + rwxr-xr-x; 755 = plain executable.
-    let mode = if !as_user && process::is_root() {
-        0o4755
-    } else {
-        0o755
-    };
     let mut perms = std::fs::metadata(path)?.permissions();
-    perms.set_mode(mode);
+    perms.set_mode(0o755);
     std::fs::set_permissions(path, perms).with_context(|| format!("chmod {}", path.display()))
 }
 
 #[cfg(not(unix))]
-fn set_install_mode(_path: &std::path::Path, _as_user: bool) -> Result<()> {
+fn set_executable(_path: &std::path::Path) -> Result<()> {
     Ok(())
 }

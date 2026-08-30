@@ -193,6 +193,35 @@ if [ "$WANT_HELPER" -eq 1 ]; then
     fi
 fi
 
+# --- fetch support libraries (libwine) into Pulse's lib dir ------------------
+# wine-run needs libwine. Install it where Pulse looks first: the lib dir for
+# this mode (/usr/lib/pulse, /opt/pulse/lib, or ~/.pulse/lib). Source: a
+# pulse-libs release asset, or PULSE_LIBWINE_URL. Best-effort — skipped quietly
+# if no source is available (a system libwine still works).
+if [ "$INSTALL_TYPE" = "user" ]; then
+    LIB_DIR="$HOME/.pulse/lib"
+    LIB_OWNER=""
+else
+    LIB_DIR="$SYS_LIB"
+    LIB_OWNER="root"
+fi
+LIBS_URL="${PULSE_LIBWINE_URL:-https://github.com/$OWNER/$REPO/releases/latest/download/pulse-libs-${OS}-${ARCH}.tar.gz}"
+
+if curl -fsSL "$LIBS_URL" -o "$TMP/libs.tar.gz" 2>/dev/null \
+    && tar -C "$TMP" -xzf "$TMP/libs.tar.gz" 2>/dev/null; then
+    placed=0
+    for f in "$TMP"/libwine*.dylib "$TMP"/libwine*.so*; do
+        [ -e "$f" ] || continue
+        if place 0755 "$LIB_OWNER" "$f" "$LIB_DIR"; then placed=1; fi
+    done
+    if [ "$placed" -eq 1 ]; then
+        echo "pulse: installed support libraries to $LIB_DIR"
+    fi
+else
+    echo "pulse: no support libraries fetched — wine-run will use a system libwine" >&2
+    echo "       (set PULSE_LIBWINE_URL to a libwine bundle to install one)" >&2
+fi
+
 # --- record mode + finish ----------------------------------------------------
 case "$INSTALL_TYPE" in
     global) record_mode system ;;
