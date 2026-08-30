@@ -73,6 +73,9 @@ echo "pulse: uninstalling the $MODE install..."
 if [ "$MODE" = "system" ]; then
     remove_file "$SYS_BIN"
     remove_file "$HELPER"
+    # PATH entries the installer added (specific files).
+    remove_file "/etc/paths.d/pulse"       # macOS system PATH
+    remove_file "/etc/profile.d/pulse.sh"  # Linux system PATH
 else
     remove_file "$USER_BIN"
 fi

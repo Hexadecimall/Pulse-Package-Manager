@@ -203,9 +203,47 @@ case "$INSTALL_TYPE" in
     *) record_mode user ;;
 esac
 
+# Put the bin dir on PATH for real. A dir under $HOME goes on the user's shell
+# profile; a system dir goes on the system-wide PATH (macOS /etc/paths.d, Linux
+# /etc/profile.d) — unless it's already there (e.g. Linux /usr/bin).
+add_to_path() {
+    local dir="$1"
+    case ":$PATH:" in *":$dir:"*) return 0 ;; esac   # already on PATH
+
+    if [ "${dir#"$HOME"}" != "$dir" ]; then
+        # User path -> shell profile.
+        local profile
+        case "${SHELL:-}" in
+            *zsh) profile="$HOME/.zprofile" ;;
+            *bash) if [ -f "$HOME/.bashrc" ]; then profile="$HOME/.bashrc"; else profile="$HOME/.bash_profile"; fi ;;
+            *) profile="$HOME/.profile" ;;
+        esac
+        if ! grep -qsF "$dir" "$profile" 2>/dev/null; then
+            printf '\n# Added by the Pulse installer\nexport PATH="%s:$PATH"\n' "$dir" >> "$profile"
+        fi
+        echo "pulse: added $dir to your PATH in $profile"
+    elif [ "$OS" = "macos" ]; then
+        # System path on macOS -> /etc/paths.d (read by path_helper).
+        if [ -w /etc/paths.d ]; then
+            printf '%s\n' "$dir" > /etc/paths.d/pulse
+        elif command -v sudo >/dev/null 2>&1; then
+            printf '%s\n' "$dir" | sudo tee /etc/paths.d/pulse >/dev/null
+        fi
+        echo "pulse: added $dir to the system PATH (/etc/paths.d/pulse)"
+    else
+        # System path on Linux -> /etc/profile.d.
+        local line
+        line="export PATH=\"$dir:\$PATH\""
+        if [ -w /etc/profile.d ]; then
+            printf '%s\n' "$line" > /etc/profile.d/pulse.sh
+        elif command -v sudo >/dev/null 2>&1; then
+            printf '%s\n' "$line" | sudo tee /etc/profile.d/pulse.sh >/dev/null
+        fi
+        echo "pulse: added $dir to the system PATH (/etc/profile.d/pulse.sh)"
+    fi
+}
+
 echo
 echo "Installed $BIN_DIR/pulse"
-case ":$PATH:" in
-    *":$BIN_DIR:"*) : ;;
-    *) echo "Add $BIN_DIR to your PATH:"; echo "    export PATH=\"$BIN_DIR:\$PATH\"" ;;
-esac
+add_to_path "$BIN_DIR"
+echo "Open a new terminal (or source your profile) for the PATH change to take effect."
