@@ -21,6 +21,7 @@ pub mod apt;
 pub mod direct;
 pub mod dnf;
 pub mod homebrew;
+pub mod macports;
 pub mod msys2;
 pub mod pacman;
 pub mod registry;

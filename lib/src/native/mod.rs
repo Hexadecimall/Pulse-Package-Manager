@@ -28,6 +28,8 @@ pub enum PkgFormat {
     TarXz,
     /// zstd-compressed tarball (`.pkg.tar.zst`) — Arch/MSYS2. Not unpacked yet.
     TarZst,
+    /// bzip2-compressed tarball (`.tbz2`/`.tar.bz2`) — MacPorts. Not unpacked yet.
+    TarBz2,
     /// Debian package (`.deb`). Not unpacked yet.
     Deb,
     /// RPM package (`.rpm`). Not unpacked yet.
