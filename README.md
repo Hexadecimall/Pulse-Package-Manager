@@ -21,7 +21,7 @@ place.
   automatically, used transparently. You run `pulse install`, Pulse picks the
   right tool for the platform you're on.
 - **Installs binaries directly.** Pull a release straight from where it lives,
-  drop it in `~/.pulse/bin`, and it's on your `PATH`. Works even on systems
+  drop it in your bin directory, and it's on your `PATH`. Works even on systems
   with no package manager Pulse recognizes.
 - **Keeps track of what it installed.** Everything Pulse puts on your machine
   is recorded, so `list`, `update`, and `remove` know exactly what they're
@@ -42,28 +42,33 @@ pulse doctor                # check the environment and report problems
 
 Two global options:
 
-- `--as-user` keeps everything in your home (`~/.pulse`) and never touches
-  system paths or asks for root.
+- `--as-root` / `--as-user` choose where things go — system-wide
+  (`/usr/local/bin`, needs root) or in your home (`~/.local/bin`, no root). The
+  default follows how Pulse was installed; a system-mode operation that can't
+  write its target falls back to `~/.local/bin` automatically.
 - `--update [stable|beta|dev]` updates Pulse itself (see below).
 
 ## How it's laid out
 
-Pulse keeps its state in a single directory, `~/.pulse`:
+Pulse keeps its **state** in `~/.pulse`, and installs **binaries** to a bin
+directory that depends on the mode:
 
 ```
 ~/.pulse/
-├── bin/            binaries Pulse installed directly (added to PATH)
-├── config.toml     settings
+├── config          settings (TOML)
 └── db.json         record of everything Pulse has installed
+
+~/.local/bin/       user-mode installed binaries   (on your PATH)
+/usr/local/bin/     system-mode installed binaries  (system install)
 ```
 
-The project itself is a small workspace:
+The project is a small workspace:
 
-- **`lib-pulse`** — the library. Backend detection, the package-manager
-  adapters, direct-binary installation, and the state database. All the actual
-  logic lives here, so it can be embedded in other tools too.
-- **`pulse`** — the command-line front end. A thin layer that parses arguments
-  and calls into `lib-pulse`.
+- **`lib/`** — the library (crate `pulse`). Source detection, the native
+  installers, the direct-binary installer, and the state database.
+- **`cli/`** — the command-line front end (produces the `pulse` binary).
+- **`pulse/`** — `pulse-registry`, Pulse's own package registry (manifest
+  format + index client). Not a default source yet.
 
 ## Installing
 
@@ -73,10 +78,10 @@ Grab a prebuilt binary — no build step:
 curl -fsSL https://raw.githubusercontent.com/Hexadecimall/Pulse-Package-Manager/main/install.sh | bash
 ```
 
-By default this installs to `/usr/local/bin` **setuid-root**, so Pulse can drive
-system package managers (apt, dnf, pacman) without a password. Pass `--as-user`
-to install into `~/.pulse/bin` with no root at all. On Windows, run
-`install.ps1` instead (elevation is handled by UAC).
+By default this installs to `/usr/local/bin` **setuid-root** (falling back to a
+user install if root isn't available). Pass `--as-user` to install into
+`~/.local/bin` with no root at all. On Windows, run `install.ps1` instead
+(elevation is handled by UAC).
 
 ## Updating
 
@@ -90,7 +95,7 @@ pulse --update dev       # newest, experimental
 ```
 
 `--as-user` works here too: `pulse --update dev --as-user` updates the copy in
-`~/.pulse/bin` instead of the system one.
+`~/.local/bin` instead of the system one.
 
 ## Building from source
 

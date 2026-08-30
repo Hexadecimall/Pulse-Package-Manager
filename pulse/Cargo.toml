@@ -1,11 +1,16 @@
 [package]
-name = "pulse"
+name = "pulse-registry"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
+# Pulse's own package registry: the manifest format and the client that reads
+# a Pulse index. Kept standalone (its own HTTP) so the core library can depend
+# on it without a dependency cycle.
+
 [dependencies]
-clap.workspace = true
 anyhow.workspace = true
-lib-pulse = { path = "../lib-pulse" }
+serde.workspace = true
+serde_json.workspace = true
+reqwest.workspace = true

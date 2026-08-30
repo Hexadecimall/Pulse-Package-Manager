@@ -1,8 +1,9 @@
 use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
-use lib_pulse::pulse::InstallOptions;
-use lib_pulse::update::{self, Channel};
-use lib_pulse::{Registry, paths, pulse};
+use pulse::mode::{self, Mode};
+use pulse::ops::InstallOptions;
+use pulse::update::{self, Channel};
+use pulse::{Registry, ops, paths};
 use std::str::FromStr;
 
 #[derive(Parser)]
@@ -16,8 +17,12 @@ struct Cli {
     #[arg(long, value_name = "CHANNEL", num_args = 0..=1, default_missing_value = "")]
     update: Option<String>,
 
-    /// Operate in your home (~/.pulse), never touching system paths or needing root
+    /// Operate system-wide (system paths; needs root or a setuid install)
     #[arg(long, global = true)]
+    as_root: bool,
+
+    /// Operate in your home (~/.local), never touching system paths or needing root
+    #[arg(long, global = true, conflicts_with = "as_root")]
     as_user: bool,
 
     #[command(subcommand)]
@@ -59,6 +64,14 @@ enum Command {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    // A flag fixes the operating mode for this run; otherwise it's resolved
+    // lazily from the recorded install mode (defaulting to user).
+    if cli.as_root {
+        mode::set(Mode::System);
+    } else if cli.as_user {
+        mode::set(Mode::User);
+    }
+
     // `--update [channel]` is a top-level action, separate from the package
     // `update` subcommand (which updates installed packages).
     if let Some(channel_arg) = cli.update {
@@ -67,7 +80,7 @@ fn main() -> Result<()> {
         } else {
             Some(Channel::from_str(&channel_arg)?)
         };
-        let outcome = update::self_update(channel, cli.as_user)?;
+        let outcome = update::self_update(channel)?;
         if outcome.already_current {
             println!(
                 "Pulse is already up to date on {} ({}).",
@@ -102,18 +115,17 @@ fn main() -> Result<()> {
                 direct,
                 backend,
                 name,
-                as_user: cli.as_user,
             };
-            let pkg = pulse::install(&target, &opts)?;
+            let pkg = ops::install(&target, &opts)?;
             let version = pkg.version.as_deref().unwrap_or("");
             println!("Installed {} {} [{}]", pkg.name, version, pkg.source);
         }
         Command::Remove { package } => {
-            pulse::remove(&package)?;
+            ops::remove(&package)?;
             println!("Removed {package}");
         }
         Command::Search { query } => {
-            let results = pulse::search(&query)?;
+            let results = ops::search(&query)?;
             if results.is_empty() {
                 println!("No results for \"{query}\".");
             }
@@ -123,7 +135,7 @@ fn main() -> Result<()> {
             }
         }
         Command::List => {
-            let db = pulse::installed()?;
+            let db = ops::installed()?;
             if db.is_empty() {
                 println!("Pulse hasn't installed anything yet.");
             }
@@ -134,12 +146,12 @@ fn main() -> Result<()> {
         }
         Command::Update { package } => match package {
             Some(p) => {
-                let pkg = pulse::update(&p)?;
+                let pkg = ops::update(&p)?;
                 let version = pkg.version.as_deref().unwrap_or("");
                 println!("Updated {} {} [{}]", pkg.name, version, pkg.source);
             }
             None => {
-                let failures = pulse::update_all()?;
+                let failures = ops::update_all()?;
                 if failures.is_empty() {
                     println!("Everything is up to date.");
                 } else {
@@ -149,7 +161,7 @@ fn main() -> Result<()> {
                 }
             }
         },
-        Command::Info { package } => match pulse::info(&package)? {
+        Command::Info { package } => match ops::info(&package)? {
             Some(p) => {
                 println!("{}", p.name);
                 if let Some(v) = &p.version {
@@ -176,19 +188,20 @@ fn main() -> Result<()> {
                 println!("{:<10} {}", b.name(), mark);
             }
             println!("{:<10} available", "direct");
+            println!("{:<10} available", "registry");
         }
         Command::Doctor => {
             paths::ensure()?;
+            println!("Mode:       {}", mode::current().as_str());
             println!("Pulse home: {}", paths::home()?.display());
+            println!("Install to: {}", paths::bin_dir()?.display());
             let registry = Registry::all();
             let available = registry.available();
             if available.is_empty() {
-                println!(
-                    "No system package managers detected. Direct-binary installs will still work."
-                );
+                println!("No native OS source detected. Direct and registry installs still work.");
             } else {
                 let names: Vec<&str> = available.iter().map(|b| b.name()).collect();
-                println!("Detected backends: {}", names.join(", "));
+                println!("Detected sources: {}", names.join(", "));
             }
         }
     }

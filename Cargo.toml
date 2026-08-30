@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["lib-pulse", "pulse"]
+members = ["lib", "cli", "pulse"]
 
 [workspace.package]
 version = "0.1.0"

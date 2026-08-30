@@ -3,35 +3,43 @@
 # Install Pulse from a prebuilt release — no building required.
 #
 # Usage:
-#   ./install.sh [stable|beta|dev] [--as-user]
+#   ./install.sh [stable|beta|dev] [--as-user] [--as-root]
 #
-#   stable (default)  the latest thoroughly-tested release
-#   beta              the newest confirmed-but-lightly-tested prerelease
-#   dev               the newest experimental build
-#   --as-user         install into ~/.pulse/bin (no root); otherwise the binary
-#                     is installed to /usr/local/bin setuid-root, so Pulse can
-#                     drive system package managers without a password
+#   stable (default)  latest thoroughly-tested release
+#   beta              newest confirmed-but-lightly-tested prerelease
+#   dev               newest experimental build
+#   --as-root         system install to /usr/local/bin, setuid-root (default)
+#   --as-user         user install to ~/.local/bin, no root
+#
+# A system install needs root. If root isn't available (no sudo, or you decline),
+# the install falls back to a user install in ~/.local/bin.
 #
 set -euo pipefail
 
 OWNER="Hexadecimall"
 REPO="Pulse-Package-Manager"
-PREFIX="${PREFIX:-/usr/local/bin}"
 
 CHANNEL="stable"
-AS_USER=0
+MODE="system"   # default
 for arg in "$@"; do
     case "$arg" in
         stable|beta|dev) CHANNEL="$arg" ;;
-        --as-user) AS_USER=1 ;;
-        *) echo "usage: install.sh [stable|beta|dev] [--as-user]" >&2; exit 1 ;;
+        --as-user) MODE="user" ;;
+        --as-root) MODE="system" ;;
+        *) echo "usage: install.sh [stable|beta|dev] [--as-user] [--as-root]" >&2; exit 1 ;;
     esac
 done
 
-# A system install needs root; re-run under sudo before doing anything else.
-if [ "$AS_USER" -eq 0 ] && [ "$(id -u)" -ne 0 ]; then
-    echo "pulse: a system install needs root; re-running with sudo..."
-    exec sudo -E bash "$0" "$@"
+# A system install needs root. Re-run under sudo if we can; otherwise fall back
+# to a user install rather than failing.
+if [ "$MODE" = "system" ] && [ "$(id -u)" -ne 0 ]; then
+    if command -v sudo >/dev/null 2>&1; then
+        echo "pulse: system install needs root; re-running with sudo..."
+        exec sudo -E bash "$0" "$@"
+    else
+        echo "pulse: no root available — falling back to a user install in ~/.local/bin" >&2
+        MODE="user"
+    fi
 fi
 
 # Detect the platform, matching the release asset naming.
@@ -70,21 +78,33 @@ tar -C "$TMP" -xzf "$TMP/$ASSET"
 [ -f "$TMP/pulse" ] || { echo "release archive did not contain 'pulse'" >&2; exit 1; }
 chmod +x "$TMP/pulse"
 
-if [ "$AS_USER" -eq 1 ]; then
-    DEST="$HOME/.pulse/bin/pulse"
-    install -d "$HOME/.pulse/bin"
+# Record the install mode so the installed binary defaults to it. Written to the
+# invoking user's ~/.pulse/config (not root's, when we escalated via sudo).
+record_mode() {
+    local home
+    home="$(eval echo "~${SUDO_USER:-$USER}")"
+    install -d "$home/.pulse"
+    printf 'install_mode = "%s"\n' "$1" > "$home/.pulse/config"
+    [ -n "${SUDO_USER:-}" ] && chown "$SUDO_USER" "$home/.pulse/config" "$home/.pulse" 2>/dev/null || true
+}
+
+if [ "$MODE" = "user" ]; then
+    DEST="$HOME/.local/bin/pulse"
+    install -d "$HOME/.local/bin"
     install -m 0755 "$TMP/pulse" "$DEST"
+    record_mode user
     echo
-    echo "Installed $DEST"
-    echo 'Add this to your shell profile so it (and directly-installed binaries) are found:'
-    echo '    export PATH="$HOME/.pulse/bin:$PATH"'
+    echo "Installed $DEST (user mode)"
+    echo 'Make sure ~/.local/bin is on your PATH:'
+    echo '    export PATH="$HOME/.local/bin:$PATH"'
 else
-    DEST="$PREFIX/pulse"
-    install -d "$PREFIX"
+    DEST="/usr/local/bin/pulse"
+    install -d /usr/local/bin
     # mode 4755: setuid + rwxr-xr-x, owned by root.
     install -o root -m 4755 "$TMP/pulse" "$DEST"
+    record_mode system
     echo
-    echo "Installed $DEST (setuid-root)"
-    echo 'Add this to your shell profile so directly-installed binaries are found:'
-    echo '    export PATH="$HOME/.pulse/bin:$PATH"'
+    echo "Installed $DEST (system mode, setuid-root)"
+    echo 'Make sure ~/.local/bin is on your PATH for --as-user installs:'
+    echo '    export PATH="$HOME/.local/bin:$PATH"'
 fi

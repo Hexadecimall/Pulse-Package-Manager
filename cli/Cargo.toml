@@ -1,0 +1,15 @@
+[package]
+name = "pulse-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "pulse"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+anyhow.workspace = true
+pulse = { path = "../lib" }

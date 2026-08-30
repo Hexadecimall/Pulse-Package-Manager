@@ -631,22 +631,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lib-pulse"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "dirs",
- "flate2",
- "libc",
- "reqwest",
- "serde",
- "serde_json",
- "tar",
- "toml",
- "zip",
-]
-
-[[package]]
 name = "libc"
 version = "0.2.189"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -765,8 +749,35 @@ name = "pulse"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "dirs",
+ "flate2",
+ "libc",
+ "pulse-registry",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tar",
+ "toml",
+ "zip",
+]
+
+[[package]]
+name = "pulse-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
  "clap",
- "lib-pulse",
+ "pulse",
+]
+
+[[package]]
+name = "pulse-registry"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "reqwest",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -103,12 +103,12 @@ impl Registry {
         Direct
     }
 
-    /// Look up a specific backend by its identifier, including `"direct"`.
+    /// Look up a specific source by its identifier, including the always-on
+    /// `"direct"` and `"registry"` sources.
     pub fn get(&self, name: &str) -> Option<Box<dyn Backend>> {
-        if name == "direct" {
-            return Some(Box::new(Direct));
-        }
         match name {
+            "direct" => Some(Box::new(Direct)),
+            "registry" => Some(Box::new(crate::registry::RegistrySource)),
             "homebrew" => Some(Box::new(Homebrew)),
             "apt" => Some(Box::new(Apt)),
             "dnf" => Some(Box::new(Dnf)),

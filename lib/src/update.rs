@@ -57,9 +57,11 @@ pub struct UpdateOutcome {
 }
 
 /// Update Pulse to the latest release on `channel`. With `channel` unset, reuse
-/// the last channel from config (defaulting to stable). `as_user` installs into
-/// `~/.pulse/bin` instead of replacing the running (possibly system) binary.
-pub fn self_update(channel: Option<Channel>, as_user: bool) -> Result<UpdateOutcome> {
+/// the last channel from config (defaulting to stable). In user mode the new
+/// binary goes to the user bin dir; in system mode it replaces the running
+/// (system) binary in place.
+pub fn self_update(channel: Option<Channel>) -> Result<UpdateOutcome> {
+    let as_user = crate::mode::current() == crate::mode::Mode::User;
     let cfg = Config::load().unwrap_or_default();
     let channel = channel.unwrap_or_else(|| {
         cfg.channel
