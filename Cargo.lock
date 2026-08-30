@@ -794,7 +794,7 @@ dependencies = [
 
 [[package]]
 name = "pulse"
-version = "0.1.0"
+version = "0.8.5"
 dependencies = [
  "anyhow",
  "cc",
@@ -813,7 +813,7 @@ dependencies = [
 
 [[package]]
 name = "pulse-cli"
-version = "0.1.0"
+version = "0.8.5"
 dependencies = [
  "anyhow",
  "clap",
@@ -824,11 +824,11 @@ dependencies = [
 
 [[package]]
 name = "pulse-helper"
-version = "0.1.0"
+version = "0.8.5"
 
 [[package]]
 name = "pulse-registry"
-version = "0.1.0"
+version = "0.8.5"
 dependencies = [
  "anyhow",
  "reqwest",
