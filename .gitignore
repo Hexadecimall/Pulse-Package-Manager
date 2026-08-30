@@ -1,2 +1,7 @@
 target/
 .DS_Store
+# macOS AppleDouble files created on non-HFS volumes (e.g. this external drive).
+._*
+.AppleDouble
+.Spotlight-V100
+.Trashes
