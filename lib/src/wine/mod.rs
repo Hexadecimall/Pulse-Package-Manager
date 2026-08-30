@@ -21,32 +21,109 @@ unsafe extern "C" {
     ) -> c_int;
 }
 
-#[cfg(target_os = "macos")]
-const LIBWINE_NAMES: &[&str] = &["libwine.1.dylib", "libwine.dylib"];
-#[cfg(not(target_os = "macos"))]
-const LIBWINE_NAMES: &[&str] = &["libwine.so.1", "libwine.so"];
+/// Whether a filename is a libwine shared library (any version suffix).
+fn is_libwine(name: &str) -> bool {
+    name.starts_with("libwine") && (name.ends_with(".dylib") || name.contains(".so"))
+}
 
-/// Where Pulse looks for a bundled libwine, in order: its own `lib` dir (the
-/// install location — `/usr/lib/pulse`, `/opt/pulse/lib`, or `~/.pulse/lib`),
-/// then next to the running binary (handy while debugging).
-fn bundled_candidates() -> Vec<PathBuf> {
-    let mut dirs: Vec<PathBuf> = Vec::new();
+/// Directories to search for a *full* Wine installation (a libwine that has its
+/// support files — ntdll, the loader — next to it, which a lone dylib doesn't).
+fn wine_search_roots() -> Vec<PathBuf> {
+    let mut roots: Vec<PathBuf> = Vec::new();
+
+    if let Ok(root) = std::env::var("PULSE_WINE_ROOT") {
+        roots.push(PathBuf::from(root));
+    }
+    // A Wine bundle installed by Pulse into its lib dir.
     #[cfg(unix)]
     if let Ok(lib) = paths::lib_dir() {
-        dirs.push(lib);
+        roots.push(lib.join("wine"));
+        roots.push(lib);
     }
+    if let Ok(home) = std::env::var("HOME") {
+        roots.push(PathBuf::from(&home).join(".pulse").join("wine"));
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        for cellar in [
+            "/opt/homebrew/Cellar/wine-stable",
+            "/opt/homebrew/Cellar/wine",
+            "/usr/local/Cellar/wine-stable",
+            "/usr/local/Cellar/wine",
+        ] {
+            roots.push(PathBuf::from(cellar));
+        }
+        if let Ok(apps) = std::fs::read_dir("/Applications") {
+            for entry in apps.flatten() {
+                let p = entry.path();
+                if p.file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|n| n.contains("Wine"))
+                    .unwrap_or(false)
+                {
+                    roots.push(p);
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        for dir in [
+            "/opt/wine-stable",
+            "/opt/wine-devel",
+            "/opt/wine-staging",
+            "/usr/lib/wine",
+            "/usr/lib64/wine",
+            "/usr/lib/x86_64-linux-gnu/wine",
+        ] {
+            roots.push(PathBuf::from(dir));
+        }
+    }
+
     if let Ok(exe) = std::env::current_exe()
         && let Some(parent) = exe.parent()
     {
-        dirs.push(parent.to_path_buf());
+        roots.push(parent.to_path_buf());
     }
-    let mut out = Vec::new();
-    for dir in dirs {
-        for name in LIBWINE_NAMES {
-            let candidate = dir.join(name);
-            if candidate.exists() {
-                out.push(candidate);
-            }
+    roots
+}
+
+/// Recursively find a libwine under `dir`, bounded in depth.
+fn find_libwine(dir: &std::path::Path, depth: u32) -> Option<PathBuf> {
+    if depth == 0 {
+        return None;
+    }
+    let mut subdirs = Vec::new();
+    for entry in std::fs::read_dir(dir).ok()?.flatten() {
+        let p = entry.path();
+        if p.is_file()
+            && p.file_name()
+                .and_then(|n| n.to_str())
+                .map(is_libwine)
+                .unwrap_or(false)
+        {
+            return Some(p);
+        } else if p.is_dir() {
+            subdirs.push(p);
+        }
+    }
+    for sub in subdirs {
+        if let Some(found) = find_libwine(&sub, depth - 1) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+/// libwine paths to try, in order, by searching real Wine install locations.
+fn bundled_candidates() -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = Vec::new();
+    for root in wine_search_roots() {
+        if let Some(found) = find_libwine(&root, 6)
+            && !out.contains(&found)
+        {
+            out.push(found);
         }
     }
     out

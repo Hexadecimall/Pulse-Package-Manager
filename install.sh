@@ -193,33 +193,32 @@ if [ "$WANT_HELPER" -eq 1 ]; then
     fi
 fi
 
-# --- fetch support libraries (libwine) into Pulse's lib dir ------------------
-# wine-run needs libwine. Install it where Pulse looks first: the lib dir for
-# this mode (/usr/lib/pulse, /opt/pulse/lib, or ~/.pulse/lib). Source: a
-# pulse-libs release asset, or PULSE_LIBWINE_URL. Best-effort — skipped quietly
-# if no source is available (a system libwine still works).
+# --- fetch a Wine bundle for wine-run ----------------------------------------
+# wine-run needs a *full* Wine install (a lone libwine can't run anything — it
+# needs its ntdll/loader siblings). Install one into Pulse's lib dir under
+# `wine/`, where wine-run looks. Source: PULSE_WINE_URL, or a pulse-wine release
+# asset. Best-effort — if none is available, wine-run falls back to any Wine
+# already on the system (Homebrew, /Applications, WineHQ, PULSE_WINE_ROOT).
 if [ "$INSTALL_TYPE" = "user" ]; then
     LIB_DIR="$HOME/.pulse/lib"
-    LIB_OWNER=""
 else
     LIB_DIR="$SYS_LIB"
-    LIB_OWNER="root"
 fi
-LIBS_URL="${PULSE_LIBWINE_URL:-https://github.com/$OWNER/$REPO/releases/latest/download/pulse-libs-${OS}-${ARCH}.tar.gz}"
+WINE_DIR="$LIB_DIR/wine"
+WINE_URL="${PULSE_WINE_URL:-https://github.com/$OWNER/$REPO/releases/latest/download/pulse-wine-${OS}-${ARCH}.tar.gz}"
 
-if curl -fsSL "$LIBS_URL" -o "$TMP/libs.tar.gz" 2>/dev/null \
-    && tar -C "$TMP" -xzf "$TMP/libs.tar.gz" 2>/dev/null; then
-    placed=0
-    for f in "$TMP"/libwine*.dylib "$TMP"/libwine*.so*; do
-        [ -e "$f" ] || continue
-        if place 0755 "$LIB_OWNER" "$f" "$LIB_DIR"; then placed=1; fi
-    done
-    if [ "$placed" -eq 1 ]; then
-        echo "pulse: installed support libraries to $LIB_DIR"
+if curl -fsSL "$WINE_URL" -o "$TMP/wine.tar.gz" 2>/dev/null; then
+    if [ -w "$(dirname "$WINE_DIR")" ] 2>/dev/null || [ "$INSTALL_TYPE" = "user" ]; then
+        mkdir -p "$WINE_DIR"
+        tar -C "$WINE_DIR" -xzf "$TMP/wine.tar.gz"
+    elif command -v sudo >/dev/null 2>&1; then
+        sudo mkdir -p "$WINE_DIR"
+        sudo tar -C "$WINE_DIR" -xzf "$TMP/wine.tar.gz"
     fi
+    echo "pulse: installed Wine bundle to $WINE_DIR"
 else
-    echo "pulse: no support libraries fetched — wine-run will use a system libwine" >&2
-    echo "       (set PULSE_LIBWINE_URL to a libwine bundle to install one)" >&2
+    echo "pulse: no Wine bundle fetched — wine-run will use a Wine already installed" >&2
+    echo "       on the system, or set PULSE_WINE_URL to a Wine bundle." >&2
 fi
 
 # --- record mode + finish ----------------------------------------------------
