@@ -36,6 +36,15 @@ case "$(uname -m)" in
 esac
 ASSET="pulse-${OS}-${ARCH}.tar.gz"
 
+# Per-OS system install directory (user override via PULSE_PREFIX).
+if [ -n "${PULSE_PREFIX:-}" ]; then
+    SYS_DIR="$PULSE_PREFIX/bin"
+elif [ "$OS" = "linux" ]; then
+    SYS_DIR="/usr/bin"
+else
+    SYS_DIR="/opt/pulse/bin"
+fi
+
 # --- settings (defaults, then the menu may change them) ----------------------
 # INSTALL_TYPE: global | user | user+helper
 if [ "$(id -u)" -eq 0 ]; then
@@ -84,12 +93,12 @@ fi
 if [ -n "$LOCATION" ]; then
     BIN_DIR="$LOCATION"
 elif [ "$INSTALL_TYPE" = "global" ]; then
-    BIN_DIR="/usr/local/bin"
+    BIN_DIR="$SYS_DIR"
 else
     BIN_DIR="$HOME/.local/bin"
 fi
-# The helper always lands in the system prefix (it must be root-owned setuid).
-HELPER_DIR="/usr/local/bin"
+# The helper always lands in the system directory (root-owned, setuid).
+HELPER_DIR="$SYS_DIR"
 WANT_HELPER=0
 [ "$INSTALL_TYPE" = "global" ] && WANT_HELPER=1
 [ "$INSTALL_TYPE" = "user+helper" ] && WANT_HELPER=1

@@ -15,8 +15,10 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-/// System prefixes the helper is willing to modify.
-const ALLOWED_PREFIXES: &[&str] = &["/usr/local/", "/opt/pulse/"];
+/// System prefixes the helper is willing to modify. These match Pulse's per-OS
+/// system bin directories (`/usr/bin` on Linux, `/opt/pulse` on macOS), plus
+/// `/usr/local` for compatibility.
+const ALLOWED_PREFIXES: &[&str] = &["/usr/bin/", "/opt/pulse/", "/usr/local/"];
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();

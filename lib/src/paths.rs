@@ -9,13 +9,38 @@ use crate::mode::{self, Mode};
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
-/// The system prefix binaries are installed under in system mode. Overridable
-/// with the `PULSE_PREFIX` environment variable.
+/// Where system-mode binaries are installed. Overridable with `PULSE_PREFIX`
+/// (which is treated as a prefix; `/bin` is appended). Defaults are per-OS:
+/// `/usr/bin` on Linux, `/opt/pulse/bin` on macOS, `Program Files\Pulse` on
+/// Windows.
 fn system_bin_dir() -> PathBuf {
-    std::env::var_os("PULSE_PREFIX")
+    if let Some(prefix) = std::env::var_os("PULSE_PREFIX") {
+        return PathBuf::from(prefix).join("bin");
+    }
+    default_system_bin_dir()
+}
+
+#[cfg(target_os = "linux")]
+fn default_system_bin_dir() -> PathBuf {
+    PathBuf::from("/usr/bin")
+}
+
+#[cfg(target_os = "macos")]
+fn default_system_bin_dir() -> PathBuf {
+    PathBuf::from("/opt/pulse/bin")
+}
+
+#[cfg(target_os = "windows")]
+fn default_system_bin_dir() -> PathBuf {
+    let program_files = std::env::var_os("ProgramFiles")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/usr/local"))
-        .join("bin")
+        .unwrap_or_else(|| PathBuf::from(r"C:\Program Files"));
+    program_files.join("Pulse")
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+fn default_system_bin_dir() -> PathBuf {
+    PathBuf::from("/usr/local/bin")
 }
 
 /// Root of Pulse's own state: `~/.pulse`. Per-user regardless of mode.
@@ -24,10 +49,18 @@ pub fn home() -> Result<PathBuf> {
     Ok(base.join(".pulse"))
 }
 
-/// `~/.local/bin` — where user-mode binaries go.
+/// Where user-mode binaries go: `~/.local/bin` on Linux/macOS, and
+/// `%LOCALAPPDATA%\Pulse\bin` on Windows.
+#[cfg(not(windows))]
 pub fn user_bin_dir() -> Result<PathBuf> {
     let base = dirs::home_dir().context("could not determine the home directory")?;
     Ok(base.join(".local").join("bin"))
+}
+
+#[cfg(windows)]
+pub fn user_bin_dir() -> Result<PathBuf> {
+    let base = dirs::data_local_dir().context("could not determine the local app-data directory")?;
+    Ok(base.join("Pulse").join("bin"))
 }
 
 /// Where installed binaries go for the current run's mode. A system target that
