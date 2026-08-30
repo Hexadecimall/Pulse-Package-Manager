@@ -1,10 +1,12 @@
-//! Pacman backend (Arch Linux and derivatives). `pacman -Ss` searches without
-//! privileges; install/remove need root.
+//! Pacman source (Arch Linux and derivatives) — native, no `pacman` process.
+//!
+//! Detection is by distro family. Resolution (reading the `.db` repo database
+//! and fetching `.pkg.tar.zst` packages) is on the roadmap; nothing shells out.
 
-use crate::backend::{Backend, Package, command_exists};
+use crate::backend::{Backend, Package};
 use crate::db::InstalledPackage;
-use crate::process;
-use anyhow::Result;
+use crate::{native, platform};
+use anyhow::{Result, bail};
 
 pub struct Pacman;
 
@@ -14,46 +16,23 @@ impl Backend for Pacman {
     }
 
     fn is_available(&self) -> bool {
-        command_exists("pacman")
+        cfg!(target_os = "linux")
+            && (platform::distro_is("arch") || platform::distro_is("archlinux"))
     }
 
-    fn search(&self, query: &str) -> Result<Vec<Package>> {
-        // `pacman -Ss` alternates lines: "repo/name version ..." then an
-        // indented description on the next line.
-        let out = process::output("pacman", &["-Ss", query])?;
-        let mut packages = Vec::new();
-        for line in out.lines() {
-            if line.starts_with(char::is_whitespace) {
-                // Description line — attach it to the last package.
-                if let Some(last) = packages.last_mut() {
-                    let p: &mut Package = last;
-                    p.description = Some(line.trim().to_string());
-                }
-                continue;
-            }
-            let mut parts = line.split_whitespace();
-            let Some(repo_name) = parts.next() else {
-                continue;
-            };
-            let name = repo_name.split_once('/').map(|(_, n)| n).unwrap_or(repo_name);
-            packages.push(Package {
-                name: name.to_string(),
-                version: parts.next().map(str::to_string),
-                description: None,
-                source: "pacman".to_string(),
-            });
-        }
-        Ok(packages)
+    fn search(&self, _query: &str) -> Result<Vec<Package>> {
+        bail!("the native pacman client isn't implemented yet");
     }
 
     fn install(&self, package: &str) -> Result<InstalledPackage> {
-        process::run_privileged("pacman", &["-S", "--noconfirm", package])?;
-        Ok(InstalledPackage::from_backend(
-            package, "pacman", package, None,
-        ))
+        native::install_package(&resolve(package)?)
     }
 
     fn remove(&self, package: &str) -> Result<()> {
-        process::run_privileged("pacman", &["-R", "--noconfirm", package])
+        native::remove(package)
     }
+}
+
+fn resolve(name: &str) -> Result<native::PackageFile> {
+    bail!("the native pacman client isn't implemented yet (installing '{name}' from Arch repos is on the roadmap)");
 }

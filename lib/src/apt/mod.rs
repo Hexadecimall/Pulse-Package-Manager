@@ -1,10 +1,12 @@
-//! APT backend (Debian, Ubuntu, and derivatives). Uses `apt-cache` for
-//! searches (no privileges needed) and `apt-get` for changes (needs root).
+//! APT source (Debian, Ubuntu, and derivatives) — native, no `apt` process.
+//!
+//! Detection is by distro family. Resolution (reading the Debian `Packages`
+//! index and fetching `.deb` archives) is on the roadmap; nothing shells out.
 
-use crate::backend::{Backend, Package, command_exists};
+use crate::backend::{Backend, Package};
 use crate::db::InstalledPackage;
-use crate::process;
-use anyhow::Result;
+use crate::{native, platform};
+use anyhow::{Result, bail};
 
 pub struct Apt;
 
@@ -14,37 +16,22 @@ impl Backend for Apt {
     }
 
     fn is_available(&self) -> bool {
-        command_exists("apt-get")
+        cfg!(target_os = "linux") && (platform::distro_is("debian") || platform::distro_is("ubuntu"))
     }
 
-    fn search(&self, query: &str) -> Result<Vec<Package>> {
-        // `apt-cache search` prints "name - description" per line.
-        let out = process::output("apt-cache", &["search", query])?;
-        Ok(out
-            .lines()
-            .filter_map(|line| {
-                let (name, desc) = line.split_once(" - ")?;
-                Some(Package {
-                    name: name.trim().to_string(),
-                    version: None,
-                    description: Some(desc.trim().to_string()),
-                    source: "apt".to_string(),
-                })
-            })
-            .collect())
+    fn search(&self, _query: &str) -> Result<Vec<Package>> {
+        bail!("the native apt client isn't implemented yet");
     }
 
     fn install(&self, package: &str) -> Result<InstalledPackage> {
-        process::run_privileged("apt-get", &["install", "-y", package])?;
-        Ok(InstalledPackage::from_backend(package, "apt", package, None))
+        native::install_package(&resolve(package)?)
     }
 
     fn remove(&self, package: &str) -> Result<()> {
-        process::run_privileged("apt-get", &["remove", "-y", package])
+        native::remove(package)
     }
+}
 
-    fn update(&self, package: &str) -> Result<InstalledPackage> {
-        process::run_privileged("apt-get", &["install", "--only-upgrade", "-y", package])?;
-        Ok(InstalledPackage::from_backend(package, "apt", package, None))
-    }
+fn resolve(name: &str) -> Result<native::PackageFile> {
+    bail!("the native apt client isn't implemented yet (installing '{name}' from Debian repos is on the roadmap)");
 }

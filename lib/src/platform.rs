@@ -4,6 +4,40 @@
 
 use serde_json::Value;
 
+/// Linux distro identifiers from `/etc/os-release` (`ID` plus `ID_LIKE`
+/// tokens), lowercased — e.g. `["ubuntu", "debian"]`. Empty off Linux.
+pub fn distro_ids() -> Vec<String> {
+    #[cfg(target_os = "linux")]
+    {
+        let mut ids = Vec::new();
+        if let Ok(text) = std::fs::read_to_string("/etc/os-release") {
+            for line in text.lines() {
+                if let Some(v) = line.strip_prefix("ID=") {
+                    ids.push(unquote(v).to_lowercase());
+                } else if let Some(v) = line.strip_prefix("ID_LIKE=") {
+                    ids.extend(unquote(v).split_whitespace().map(|t| t.to_lowercase()));
+                }
+            }
+        }
+        ids
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Vec::new()
+    }
+}
+
+/// Whether the running Linux distro belongs to a family (matches `ID` or an
+/// `ID_LIKE` token), e.g. `distro_is("debian")`.
+pub fn distro_is(family: &str) -> bool {
+    distro_ids().iter().any(|id| id == family)
+}
+
+#[cfg(target_os = "linux")]
+fn unquote(s: &str) -> &str {
+    s.trim().trim_matches('"').trim_matches('\'')
+}
+
 /// Canonical OS label used in Pulse's own release asset names.
 pub fn canonical_os() -> &'static str {
     match std::env::consts::OS {

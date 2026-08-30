@@ -6,6 +6,7 @@ use crate::db::InstalledPackage;
 use crate::direct::Direct;
 use crate::dnf::Dnf;
 use crate::homebrew::Homebrew;
+use crate::msys2::Msys2;
 use crate::pacman::Pacman;
 use crate::winget::Winget;
 use anyhow::Result;
@@ -73,6 +74,7 @@ impl Registry {
                 Box::new(Dnf),
                 Box::new(Pacman),
                 Box::new(Winget),
+                Box::new(Msys2),
             ],
         }
     }
@@ -114,6 +116,7 @@ impl Registry {
             "dnf" => Some(Box::new(Dnf)),
             "pacman" => Some(Box::new(Pacman)),
             "winget" => Some(Box::new(Winget)),
+            "msys2" => Some(Box::new(Msys2)),
             _ => None,
         }
     }

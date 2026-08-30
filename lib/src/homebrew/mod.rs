@@ -1,9 +1,23 @@
-//! Homebrew backend (macOS and Linux). Driven through the `brew` CLI.
+//! Homebrew source — native, no `brew` process involved.
+//!
+//! Packages are resolved through Homebrew's public JSON API
+//! (`formulae.brew.sh`), which gives the bottle (a `.tar.gz`) for the current
+//! platform and its SHA-256. Bottles live on GitHub's container registry, which
+//! needs an anonymous bearer token on the request. The shared native installer
+//! then downloads, verifies, unpacks, and places the executables.
+//!
+//! This grabs the package's binaries. Full Cellar relocation and dependency
+//! resolution are not done yet, so formulae with runtime dependencies on other
+//! bottles may not work until dependency handling lands.
 
-use crate::backend::{Backend, Package, command_exists};
+use crate::backend::{Backend, Package};
 use crate::db::InstalledPackage;
-use crate::process;
-use anyhow::Result;
+use crate::native::{self, PackageFile, PkgFormat};
+use crate::networking;
+use anyhow::{Context, Result, bail};
+
+/// The anonymous bearer token Homebrew uses to pull bottles from GHCR.
+const GHCR_ANON_TOKEN: &str = "Bearer QQ==";
 
 pub struct Homebrew;
 
@@ -12,52 +26,86 @@ impl Backend for Homebrew {
         "homebrew"
     }
 
+    /// Homebrew's bottles are macOS and Linux; treat it as available there.
     fn is_available(&self) -> bool {
-        command_exists("brew")
+        cfg!(any(target_os = "macos", target_os = "linux"))
     }
 
-    fn search(&self, query: &str) -> Result<Vec<Package>> {
-        let out = process::output_as_user("brew", &["search", query])?;
-        Ok(out
-            .lines()
-            .map(str::trim)
-            // `brew search` prints section headers like "==> Formulae".
-            .filter(|line| !line.is_empty() && !line.starts_with("==>"))
-            .map(|name| Package {
-                name: name.to_string(),
-                version: None,
-                description: None,
-                source: "homebrew".to_string(),
-            })
-            .collect())
+    fn search(&self, _query: &str) -> Result<Vec<Package>> {
+        bail!("homebrew search isn't implemented yet");
     }
 
     fn install(&self, package: &str) -> Result<InstalledPackage> {
-        // Homebrew refuses to run as root, so `brew` always runs as the
-        // invoking user even when Pulse itself is setuid-root.
-        process::run_as_user("brew", &["install", package])?;
-        let version = installed_version(package);
-        Ok(InstalledPackage::from_backend(
-            package, "homebrew", package, version,
-        ))
+        let pkg = resolve(package)?;
+        native::install_package(&pkg)
     }
 
     fn remove(&self, package: &str) -> Result<()> {
-        process::run_as_user("brew", &["uninstall", package])
-    }
-
-    fn update(&self, package: &str) -> Result<InstalledPackage> {
-        process::run_as_user("brew", &["upgrade", package])?;
-        let version = installed_version(package);
-        Ok(InstalledPackage::from_backend(
-            package, "homebrew", package, version,
-        ))
+        native::remove(package)
     }
 }
 
-/// Best-effort version lookup via `brew list --versions <pkg>`, which prints
-/// e.g. `ripgrep 14.1.1`. Returns `None` if anything about that fails.
-fn installed_version(package: &str) -> Option<String> {
-    let out = process::output_as_user("brew", &["list", "--versions", package]).ok()?;
-    out.split_whitespace().nth(1).map(str::to_string)
+/// Resolve a formula name to its bottle for this platform.
+fn resolve(name: &str) -> Result<PackageFile> {
+    let url = format!("https://formulae.brew.sh/api/formula/{name}.json");
+    let data =
+        networking::get_json(&url).with_context(|| format!("looking up formula '{name}'"))?;
+
+    let version = data["versions"]["stable"].as_str().map(str::to_string);
+
+    let files = data["bottle"]["stable"]["files"]
+        .as_object()
+        .with_context(|| format!("'{name}' has no bottles"))?;
+
+    // Pick the bottle matching this platform. Homebrew keys are `<arch>_<os>`
+    // (`arm64_sonoma` for macOS arm64, bare codenames like `sonoma` for macOS
+    // x86_64, `arm64_linux`/`x86_64_linux` for Linux), plus `all`.
+    let want_linux = cfg!(target_os = "linux");
+    let want_arm = cfg!(target_arch = "aarch64");
+    let platform_ok = |k: &str| {
+        let is_linux = k.contains("linux");
+        if is_linux != want_linux {
+            return false;
+        }
+        let is_arm = k.contains("arm64");
+        if want_linux {
+            is_arm == want_arm
+        } else if want_arm {
+            is_arm
+        } else {
+            !is_arm
+        }
+    };
+    let bottle = files
+        .iter()
+        .find(|(k, _)| platform_ok(k))
+        .or_else(|| files.iter().find(|(k, _)| k.as_str() == "all"))
+        .map(|(_, v)| v)
+        .with_context(|| format!("no bottle matching this platform for '{name}'"))?;
+
+    let bottle_url = bottle["url"]
+        .as_str()
+        .context("bottle entry has no url")?
+        .to_string();
+    let sha256 = bottle["sha256"].as_str().map(str::to_string);
+
+    let dependencies = data["dependencies"]
+        .as_array()
+        .map(|deps| {
+            deps.iter()
+                .filter_map(|d| d.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Ok(PackageFile {
+        name: name.to_string(),
+        version,
+        url: bottle_url,
+        sha256,
+        format: PkgFormat::TarGz,
+        source: "homebrew".to_string(),
+        headers: vec![("Authorization".to_string(), GHCR_ANON_TOKEN.to_string())],
+        dependencies,
+    })
 }

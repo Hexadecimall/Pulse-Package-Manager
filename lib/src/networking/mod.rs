@@ -15,8 +15,17 @@ fn client() -> Result<reqwest::blocking::Client> {
 
 /// Download a URL to a file on disk.
 pub fn download(url: &str, dest: &Path) -> Result<()> {
-    let bytes = client()?
-        .get(url)
+    download_with_headers(url, dest, &[])
+}
+
+/// Download a URL to a file on disk, sending extra request headers (e.g. a
+/// registry auth token for a package repository).
+pub fn download_with_headers(url: &str, dest: &Path, headers: &[(String, String)]) -> Result<()> {
+    let mut req = client()?.get(url);
+    for (key, value) in headers {
+        req = req.header(key.as_str(), value.as_str());
+    }
+    let bytes = req
         .send()
         .with_context(|| format!("requesting {url}"))?
         .error_for_status()

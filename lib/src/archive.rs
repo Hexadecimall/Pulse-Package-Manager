@@ -33,7 +33,7 @@ pub fn extract(archive_path: &Path, dest: &Path) -> Result<()> {
     }
 }
 
-fn extract_tar_gz(src: &Path, dest: &Path) -> Result<()> {
+pub fn extract_tar_gz(src: &Path, dest: &Path) -> Result<()> {
     let file = File::open(src).with_context(|| format!("opening {}", src.display()))?;
     let decoder = flate2::read::GzDecoder::new(file);
     tar::Archive::new(decoder)
@@ -41,7 +41,7 @@ fn extract_tar_gz(src: &Path, dest: &Path) -> Result<()> {
         .with_context(|| format!("extracting {}", src.display()))
 }
 
-fn extract_zip(src: &Path, dest: &Path) -> Result<()> {
+pub fn extract_zip(src: &Path, dest: &Path) -> Result<()> {
     let file = File::open(src).with_context(|| format!("opening {}", src.display()))?;
     let mut archive =
         zip::ZipArchive::new(file).with_context(|| format!("reading zip {}", src.display()))?;

@@ -1,9 +1,12 @@
-//! winget backend (Windows Package Manager). Driven through the `winget` CLI.
+//! winget source (Windows Package Manager) — native, no `winget` process.
+//!
+//! Resolution (reading the winget-pkgs manifest catalog and fetching the
+//! installer) is on the roadmap; nothing shells out.
 
-use crate::backend::{Backend, Package, command_exists};
+use crate::backend::{Backend, Package};
 use crate::db::InstalledPackage;
-use crate::process;
-use anyhow::Result;
+use crate::native;
+use anyhow::{Result, bail};
 
 pub struct Winget;
 
@@ -13,63 +16,22 @@ impl Backend for Winget {
     }
 
     fn is_available(&self) -> bool {
-        command_exists("winget")
+        cfg!(target_os = "windows")
     }
 
-    fn search(&self, query: &str) -> Result<Vec<Package>> {
-        // winget's table output is column-formatted with a "Name Id Version"
-        // header and a dashed separator; take the Name and Id columns.
-        let out = process::output("winget", &["search", query])?;
-        let mut lines = out.lines().skip_while(|l| !l.starts_with("---"));
-        lines.next(); // the "---" separator itself
-        Ok(lines
-            .filter(|l| !l.trim().is_empty())
-            .filter_map(|line| {
-                let mut cols = line.split_whitespace();
-                let name = cols.next()?.to_string();
-                let id = cols.next().map(str::to_string);
-                let version = cols.next().map(str::to_string);
-                Some(Package {
-                    name,
-                    version,
-                    description: id.map(|id| format!("id: {id}")),
-                    source: "winget".to_string(),
-                })
-            })
-            .collect())
+    fn search(&self, _query: &str) -> Result<Vec<Package>> {
+        bail!("the native winget client isn't implemented yet");
     }
 
     fn install(&self, package: &str) -> Result<InstalledPackage> {
-        process::run(
-            "winget",
-            &[
-                "install",
-                "--accept-package-agreements",
-                "--accept-source-agreements",
-                package,
-            ],
-        )?;
-        Ok(InstalledPackage::from_backend(
-            package, "winget", package, None,
-        ))
+        native::install_package(&resolve(package)?)
     }
 
     fn remove(&self, package: &str) -> Result<()> {
-        process::run("winget", &["uninstall", package])
+        native::remove(package)
     }
+}
 
-    fn update(&self, package: &str) -> Result<InstalledPackage> {
-        process::run(
-            "winget",
-            &[
-                "upgrade",
-                "--accept-package-agreements",
-                "--accept-source-agreements",
-                package,
-            ],
-        )?;
-        Ok(InstalledPackage::from_backend(
-            package, "winget", package, None,
-        ))
-    }
+fn resolve(name: &str) -> Result<native::PackageFile> {
+    bail!("the native winget client isn't implemented yet (installing '{name}' from the winget catalog is on the roadmap)");
 }

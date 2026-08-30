@@ -1,10 +1,12 @@
-//! DNF backend (Fedora, RHEL, and derivatives). `dnf search` needs no
-//! privileges; install/remove do.
+//! DNF source (Fedora, RHEL, and derivatives) — native, no `dnf` process.
+//!
+//! Detection is by distro family. Resolution (reading `repomd.xml`/`primary.xml`
+//! and fetching `.rpm` packages) is on the roadmap; nothing shells out.
 
-use crate::backend::{Backend, Package, command_exists};
+use crate::backend::{Backend, Package};
 use crate::db::InstalledPackage;
-use crate::process;
-use anyhow::Result;
+use crate::{native, platform};
+use anyhow::{Result, bail};
 
 pub struct Dnf;
 
@@ -14,40 +16,25 @@ impl Backend for Dnf {
     }
 
     fn is_available(&self) -> bool {
-        command_exists("dnf")
+        cfg!(target_os = "linux")
+            && (platform::distro_is("fedora")
+                || platform::distro_is("rhel")
+                || platform::distro_is("centos"))
     }
 
-    fn search(&self, query: &str) -> Result<Vec<Package>> {
-        // `dnf search` prints "name.arch : description", after a header line.
-        let out = process::output("dnf", &["--quiet", "search", query])?;
-        Ok(out
-            .lines()
-            .filter_map(|line| {
-                let (name, desc) = line.split_once(" : ")?;
-                // Drop the trailing ".arch" (e.g. ".x86_64") from the name.
-                let name = name.trim();
-                let name = name.rsplit_once('.').map(|(n, _)| n).unwrap_or(name);
-                Some(Package {
-                    name: name.to_string(),
-                    version: None,
-                    description: Some(desc.trim().to_string()),
-                    source: "dnf".to_string(),
-                })
-            })
-            .collect())
+    fn search(&self, _query: &str) -> Result<Vec<Package>> {
+        bail!("the native dnf client isn't implemented yet");
     }
 
     fn install(&self, package: &str) -> Result<InstalledPackage> {
-        process::run_privileged("dnf", &["install", "-y", package])?;
-        Ok(InstalledPackage::from_backend(package, "dnf", package, None))
+        native::install_package(&resolve(package)?)
     }
 
     fn remove(&self, package: &str) -> Result<()> {
-        process::run_privileged("dnf", &["remove", "-y", package])
+        native::remove(package)
     }
+}
 
-    fn update(&self, package: &str) -> Result<InstalledPackage> {
-        process::run_privileged("dnf", &["upgrade", "-y", package])?;
-        Ok(InstalledPackage::from_backend(package, "dnf", package, None))
-    }
+fn resolve(name: &str) -> Result<native::PackageFile> {
+    bail!("the native dnf client isn't implemented yet (installing '{name}' from Fedora/RHEL repos is on the roadmap)");
 }
