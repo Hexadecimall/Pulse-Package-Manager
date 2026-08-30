@@ -817,6 +817,8 @@ dependencies = [
  "anyhow",
  "clap",
  "pulse",
+ "pulse-registry",
+ "serde_json",
 ]
 
 [[package]]

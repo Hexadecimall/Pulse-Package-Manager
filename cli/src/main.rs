@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser, Subcommand};
 use pulse::mode::{self, Mode};
 use pulse::ops::InstallOptions;
@@ -46,7 +46,7 @@ enum Command {
         name: Option<String>,
     },
     /// Uninstall a package
-    Remove { package: String },
+    Uninstall { package: String },
     /// Search across the available backends
     Search { query: String },
     /// List everything Pulse has installed
@@ -59,6 +59,26 @@ enum Command {
     Backends,
     /// Check the environment and report problems
     Doctor,
+    /// View or change Pulse's settings (mode, channel)
+    Settings {
+        /// Setting to read or change: mode | channel
+        key: Option<String>,
+        /// New value; omit to just read the setting
+        value: Option<String>,
+    },
+    /// Developer tools for Pulse's own package registry
+    Dev {
+        #[command(subcommand)]
+        command: DevCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum DevCommand {
+    /// Write a template package manifest to <name>.json
+    New { name: String },
+    /// Validate a package manifest file
+    Check { path: String },
 }
 
 fn main() -> Result<()> {
@@ -120,9 +140,9 @@ fn main() -> Result<()> {
             let version = pkg.version.as_deref().unwrap_or("");
             println!("Installed {} {} [{}]", pkg.name, version, pkg.source);
         }
-        Command::Remove { package } => {
+        Command::Uninstall { package } => {
             ops::remove(&package)?;
-            println!("Removed {package}");
+            println!("Uninstalled {package}");
         }
         Command::Search { query } => {
             let results = ops::search(&query)?;
@@ -203,6 +223,93 @@ fn main() -> Result<()> {
                 let names: Vec<&str> = available.iter().map(|b| b.name()).collect();
                 println!("Detected sources: {}", names.join(", "));
             }
+        }
+        Command::Settings { key, value } => settings(key, value)?,
+        Command::Dev { command } => dev(command)?,
+    }
+    Ok(())
+}
+
+/// View or change Pulse's persisted settings.
+fn settings(key: Option<String>, value: Option<String>) -> Result<()> {
+    use pulse::config::Config;
+    let mut cfg = Config::load()?;
+
+    let Some(key) = key else {
+        // No key: show everything.
+        println!("mode:    {}", cfg.install_mode.as_deref().unwrap_or("(default: user)"));
+        println!("channel: {}", cfg.channel.as_deref().unwrap_or("(default: stable)"));
+        return Ok(());
+    };
+
+    match (key.as_str(), value) {
+        // Read a single setting.
+        ("mode", None) => println!("{}", cfg.install_mode.as_deref().unwrap_or("(default: user)")),
+        ("channel", None) => println!("{}", cfg.channel.as_deref().unwrap_or("(default: stable)")),
+        // Change a setting.
+        ("mode", Some(v)) => {
+            if v != "user" && v != "system" {
+                anyhow::bail!("mode must be 'user' or 'system'");
+            }
+            cfg.install_mode = Some(v.clone());
+            cfg.save()?;
+            println!("mode set to {v}");
+        }
+        ("channel", Some(v)) => {
+            if !["stable", "beta", "dev"].contains(&v.as_str()) {
+                anyhow::bail!("channel must be stable, beta, or dev");
+            }
+            cfg.channel = Some(v.clone());
+            cfg.save()?;
+            println!("channel set to {v}");
+        }
+        (other, _) => anyhow::bail!("unknown setting '{other}' (known: mode, channel)"),
+    }
+    Ok(())
+}
+
+/// Developer tools for Pulse's own package registry.
+fn dev(command: DevCommand) -> Result<()> {
+    use pulse_registry::{Artifact, Manifest};
+    use std::collections::BTreeMap;
+
+    match command {
+        DevCommand::New { name } => {
+            let mut artifacts = BTreeMap::new();
+            artifacts.insert(
+                "macos-arm64".to_string(),
+                Artifact {
+                    url: format!("https://example.com/{name}-macos-arm64.tar.gz"),
+                    sha256: None,
+                    bin: None,
+                },
+            );
+            let manifest = Manifest {
+                name: name.clone(),
+                version: "0.1.0".to_string(),
+                description: Some(format!("The {name} package.")),
+                artifacts,
+                dependencies: Vec::new(),
+            };
+            let path = format!("{name}.json");
+            let json = serde_json::to_string_pretty(&manifest)?;
+            std::fs::write(&path, json)?;
+            println!("Wrote template manifest to {path}");
+        }
+        DevCommand::Check { path } => {
+            let text = std::fs::read_to_string(&path)
+                .with_context(|| format!("reading {path}"))?;
+            let manifest: Manifest = serde_json::from_str(&text)
+                .with_context(|| format!("parsing {path}"))?;
+            if manifest.artifacts.is_empty() {
+                anyhow::bail!("{path}: manifest has no artifacts");
+            }
+            println!(
+                "{path}: OK — {} {} ({} platform artifact(s))",
+                manifest.name,
+                manifest.version,
+                manifest.artifacts.len()
+            );
         }
     }
     Ok(())
