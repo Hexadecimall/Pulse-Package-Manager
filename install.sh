@@ -36,13 +36,21 @@ case "$(uname -m)" in
 esac
 ASSET="pulse-${OS}-${ARCH}.tar.gz"
 
-# Per-OS system install directory (user override via PULSE_PREFIX).
+# Per-OS system install layout (FHS-ish). Overridable via PULSE_PREFIX.
 if [ -n "${PULSE_PREFIX:-}" ]; then
-    SYS_DIR="$PULSE_PREFIX/bin"
+    PREFIX="$PULSE_PREFIX"
 elif [ "$OS" = "linux" ]; then
-    SYS_DIR="/usr/bin"
+    PREFIX="/usr"
 else
-    SYS_DIR="/opt/pulse/bin"
+    PREFIX="/opt/pulse"
+fi
+SYS_BIN="$PREFIX/bin"
+if [ "$OS" = "linux" ]; then
+    SYS_LIBEXEC="$PREFIX/libexec/pulse"   # shared prefix -> namespace under pulse
+    SYS_LIB="$PREFIX/lib/pulse"
+else
+    SYS_LIBEXEC="$PREFIX/libexec"
+    SYS_LIB="$PREFIX/lib"
 fi
 
 # --- settings (defaults, then the menu may change them) ----------------------
@@ -93,12 +101,12 @@ fi
 if [ -n "$LOCATION" ]; then
     BIN_DIR="$LOCATION"
 elif [ "$INSTALL_TYPE" = "global" ]; then
-    BIN_DIR="$SYS_DIR"
+    BIN_DIR="$SYS_BIN"
 else
     BIN_DIR="$HOME/.local/bin"
 fi
-# The helper always lands in the system directory (root-owned, setuid).
-HELPER_DIR="$SYS_DIR"
+# The helper always lands in the system libexec directory (root-owned, setuid).
+HELPER_DIR="$SYS_LIBEXEC"
 WANT_HELPER=0
 [ "$INSTALL_TYPE" = "global" ] && WANT_HELPER=1
 [ "$INSTALL_TYPE" = "user+helper" ] && WANT_HELPER=1
@@ -160,6 +168,15 @@ if [ "$INSTALL_TYPE" = "global" ]; then
     fi
 else
     place 0755 "" "$TMP/pulse" "$BIN_DIR"
+fi
+
+# Create the system lib directory for the FHS layout (best-effort).
+if [ "$INSTALL_TYPE" = "global" ]; then
+    if [ -w "$(dirname "$SYS_LIB")" ]; then
+        install -d "$SYS_LIB"
+    elif command -v sudo >/dev/null 2>&1; then
+        sudo install -d "$SYS_LIB" || true
+    fi
 fi
 
 # --- install the setuid helper (best-effort) ---------------------------------

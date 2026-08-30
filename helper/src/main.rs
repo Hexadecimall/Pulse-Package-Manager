@@ -12,13 +12,14 @@
 //!   pulse-helper install <src> <dest>   copy <src> to <dest> (mode 0755)
 //!   pulse-helper remove  <path>         delete <path>
 
+use std::ffi::OsString;
 use std::path::Path;
 use std::process::ExitCode;
 
-/// System prefixes the helper is willing to modify. These match Pulse's per-OS
-/// system bin directories (`/usr/bin` on Linux, `/opt/pulse` on macOS), plus
-/// `/usr/local` for compatibility.
-const ALLOWED_PREFIXES: &[&str] = &["/usr/bin/", "/opt/pulse/", "/usr/local/"];
+/// System prefixes the helper is willing to modify — Pulse's own install
+/// locations: `/usr/bin` and `/usr/lib/pulse` on Linux, everything under
+/// `/opt/pulse` on macOS, plus `/usr/local` for compatibility.
+const ALLOWED_PREFIXES: &[&str] = &["/usr/bin/", "/usr/lib/pulse/", "/opt/pulse/", "/usr/local/"];
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
@@ -43,17 +44,33 @@ fn main() -> ExitCode {
     }
 }
 
-/// Whether `dest` resolves to a location under an allowed prefix. The parent is
-/// canonicalized (it must exist), then the final component is re-appended, so a
-/// not-yet-existing target file is still checked against the real parent.
+/// Whether `dest` resolves to a location under an allowed prefix.
+///
+/// Walks up to the nearest *existing* ancestor and canonicalizes it — so
+/// symlink tricks on the part that exists are defeated — then re-appends the
+/// not-yet-existing tail. Any `.` or `..` in that tail is rejected outright, so
+/// the tail can't climb back out of an allowed prefix.
 fn is_allowed(dest: &Path) -> bool {
-    let resolved = match dest.parent().map(Path::canonicalize) {
-        Some(Ok(parent)) => match dest.file_name() {
-            Some(name) => parent.join(name),
-            None => return false,
-        },
-        _ => return false,
+    let mut existing = dest;
+    let mut tail: Vec<OsString> = Vec::new();
+    while !existing.exists() {
+        match (existing.file_name(), existing.parent()) {
+            (Some(name), Some(parent)) => {
+                if name == ".." || name == "." {
+                    return false;
+                }
+                tail.push(name.to_os_string());
+                existing = parent;
+            }
+            _ => return false,
+        }
+    }
+    let Ok(mut resolved) = existing.canonicalize() else {
+        return false;
     };
+    for name in tail.iter().rev() {
+        resolved.push(name);
+    }
     let s = resolved.to_string_lossy();
     ALLOWED_PREFIXES.iter().any(|p| s.starts_with(p))
 }

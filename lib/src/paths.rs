@@ -9,38 +9,78 @@ use crate::mode::{self, Mode};
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
-/// Where system-mode binaries are installed. Overridable with `PULSE_PREFIX`
-/// (which is treated as a prefix; `/bin` is appended). Defaults are per-OS:
-/// `/usr/bin` on Linux, `/opt/pulse/bin` on macOS, `Program Files\Pulse` on
-/// Windows.
-fn system_bin_dir() -> PathBuf {
+/// The system install prefix. Per-OS default, overridable with `PULSE_PREFIX`:
+/// `/usr` on Linux, `/opt/pulse` on macOS, `Program Files\Pulse` on Windows.
+fn system_prefix() -> PathBuf {
     if let Some(prefix) = std::env::var_os("PULSE_PREFIX") {
-        return PathBuf::from(prefix).join("bin");
+        return PathBuf::from(prefix);
     }
-    default_system_bin_dir()
+    default_system_prefix()
 }
 
 #[cfg(target_os = "linux")]
-fn default_system_bin_dir() -> PathBuf {
-    PathBuf::from("/usr/bin")
+fn default_system_prefix() -> PathBuf {
+    PathBuf::from("/usr")
 }
 
 #[cfg(target_os = "macos")]
-fn default_system_bin_dir() -> PathBuf {
-    PathBuf::from("/opt/pulse/bin")
+fn default_system_prefix() -> PathBuf {
+    PathBuf::from("/opt/pulse")
 }
 
 #[cfg(target_os = "windows")]
-fn default_system_bin_dir() -> PathBuf {
-    let program_files = std::env::var_os("ProgramFiles")
+fn default_system_prefix() -> PathBuf {
+    std::env::var_os("ProgramFiles")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(r"C:\Program Files"));
-    program_files.join("Pulse")
+        .unwrap_or_else(|| PathBuf::from(r"C:\Program Files"))
+        .join("Pulse")
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-fn default_system_bin_dir() -> PathBuf {
-    PathBuf::from("/usr/local/bin")
+fn default_system_prefix() -> PathBuf {
+    PathBuf::from("/usr/local")
+}
+
+/// System bin directory. On Windows the binary sits directly in the prefix;
+/// elsewhere it's `<prefix>/bin`.
+#[cfg(windows)]
+fn system_bin_dir() -> PathBuf {
+    system_prefix()
+}
+
+#[cfg(not(windows))]
+fn system_bin_dir() -> PathBuf {
+    system_prefix().join("bin")
+}
+
+/// System `libexec` directory — internal helper programs (the setuid helper).
+/// `/usr/libexec/pulse` on Linux, `/opt/pulse/libexec` on macOS.
+#[cfg(unix)]
+pub fn system_libexec_dir() -> PathBuf {
+    let prefix = system_prefix();
+    if cfg!(target_os = "linux") {
+        prefix.join("libexec").join("pulse")
+    } else {
+        prefix.join("libexec")
+    }
+}
+
+/// System `lib` directory — Pulse's own support/data files.
+/// `/usr/lib/pulse` on Linux, `/opt/pulse/lib` on macOS.
+#[cfg(unix)]
+pub fn system_lib_dir() -> PathBuf {
+    let prefix = system_prefix();
+    if cfg!(target_os = "linux") {
+        prefix.join("lib").join("pulse")
+    } else {
+        prefix.join("lib")
+    }
+}
+
+/// Path to the setuid helper binary (Unix only).
+#[cfg(unix)]
+pub fn helper_path() -> PathBuf {
+    system_libexec_dir().join("pulse-helper")
 }
 
 /// Root of Pulse's own state: `~/.pulse`. Per-user regardless of mode.
