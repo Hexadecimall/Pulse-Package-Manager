@@ -771,6 +771,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "pulse-helper"
+version = "0.1.0"
+
+[[package]]
 name = "pulse-registry"
 version = "0.1.0"
 dependencies = [

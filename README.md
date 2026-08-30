@@ -67,6 +67,9 @@ The project is a small workspace:
 - **`lib/`** — the library (crate `pulse`). Source detection, the native
   installers, the direct-binary installer, and the state database.
 - **`cli/`** — the command-line front end (produces the `pulse` binary).
+- **`helper/`** — `pulse-helper`, a tiny setuid-root privilege helper. The main
+  `pulse` runs unprivileged and calls it for system writes; it only ever touches
+  a fixed set of allowed prefixes.
 - **`pulse/`** — `pulse-registry`, Pulse's own package registry (manifest
   format + index client). Not a default source yet.
 
@@ -78,9 +81,10 @@ Grab a prebuilt binary — no build step:
 curl -fsSL https://raw.githubusercontent.com/Hexadecimall/Pulse-Package-Manager/main/install.sh | bash
 ```
 
-By default this installs to `/usr/local/bin` **setuid-root** (falling back to a
-user install if root isn't available). Pass `--as-user` to install into
-`~/.local/bin` with no root at all. On Windows, run `install.ps1` instead
+The installer is interactive: press **enter** for the defaults (a system install
+with the setuid helper when run as root, a user install in `~/.local/bin`
+otherwise), or a number to change the install type or location. Add `--yes` to
+skip the menu and take the defaults. On Windows, run `install.ps1` instead
 (elevation is handled by UAC).
 
 ## Updating

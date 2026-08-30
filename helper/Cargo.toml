@@ -1,0 +1,15 @@
+[package]
+name = "pulse-helper"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# The setuid-root privilege helper. Deliberately tiny and dependency-free: the
+# smaller the setuid surface, the better.
+
+[[bin]]
+name = "pulse-helper"
+path = "src/main.rs"
+
+[dependencies]

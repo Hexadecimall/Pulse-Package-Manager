@@ -1,18 +1,12 @@
 #!/usr/bin/env bash
 #
-# Install Pulse from a prebuilt release — no building required.
+# Interactive installer for Pulse. Downloads a prebuilt release — no building.
 #
-# Usage:
-#   ./install.sh [stable|beta|dev] [--as-user] [--as-root]
+#   ./install.sh [stable|beta|dev] [--yes]
 #
-#   stable (default)  latest thoroughly-tested release
-#   beta              newest confirmed-but-lightly-tested prerelease
-#   dev               newest experimental build
-#   --as-root         system install to /usr/local/bin, setuid-root (default)
-#   --as-user         user install to ~/.local/bin, no root
-#
-# A system install needs root. If root isn't available (no sudo, or you decline),
-# the install falls back to a user install in ~/.local/bin.
+# With no --yes it shows a short setup menu. --yes (or a non-interactive shell)
+# takes the defaults: a system install with the setuid helper when run as root,
+# a user install in ~/.local/bin otherwise.
 #
 set -euo pipefail
 
@@ -20,29 +14,16 @@ OWNER="Hexadecimall"
 REPO="Pulse-Package-Manager"
 
 CHANNEL="stable"
-MODE="system"   # default
+ASSUME_YES=0
 for arg in "$@"; do
     case "$arg" in
         stable|beta|dev) CHANNEL="$arg" ;;
-        --as-user) MODE="user" ;;
-        --as-root) MODE="system" ;;
-        *) echo "usage: install.sh [stable|beta|dev] [--as-user] [--as-root]" >&2; exit 1 ;;
+        --yes|--defaults) ASSUME_YES=1 ;;
+        *) echo "usage: install.sh [stable|beta|dev] [--yes]" >&2; exit 1 ;;
     esac
 done
 
-# A system install needs root. Re-run under sudo if we can; otherwise fall back
-# to a user install rather than failing.
-if [ "$MODE" = "system" ] && [ "$(id -u)" -ne 0 ]; then
-    if command -v sudo >/dev/null 2>&1; then
-        echo "pulse: system install needs root; re-running with sudo..."
-        exec sudo -E bash "$0" "$@"
-    else
-        echo "pulse: no root available — falling back to a user install in ~/.local/bin" >&2
-        MODE="user"
-    fi
-fi
-
-# Detect the platform, matching the release asset naming.
+# --- platform ----------------------------------------------------------------
 case "$(uname -s)" in
     Darwin) OS="macos" ;;
     Linux) OS="linux" ;;
@@ -55,14 +36,71 @@ case "$(uname -m)" in
 esac
 ASSET="pulse-${OS}-${ARCH}.tar.gz"
 
-# Resolve the download URL for the requested channel.
+# --- settings (defaults, then the menu may change them) ----------------------
+# INSTALL_TYPE: global | user | user+helper
+if [ "$(id -u)" -eq 0 ]; then
+    INSTALL_TYPE="global"
+else
+    INSTALL_TYPE="user"
+fi
+LOCATION=""   # empty => the default for the chosen type
+
+have_tty() { [ -e /dev/tty ]; }
+
+if [ "$ASSUME_YES" -eq 0 ] && have_tty; then
+    echo "Welcome to setup for pulse!"
+    echo "Press enter to go ahead and use default settings and press a number to modify settings!"
+    echo
+    echo "[1] User-mode settings"
+    echo "[2] Location"
+    printf '> '
+    read -r choice < /dev/tty || choice=""
+
+    case "$choice" in
+        1)
+            echo
+            echo "[1] Install helper anyway"
+            echo "[2] Install globally"
+            echo "[3] Install usermode"
+            printf '> '
+            read -r sub < /dev/tty || sub=""
+            case "$sub" in
+                1) INSTALL_TYPE="user+helper" ;;
+                2) INSTALL_TYPE="global" ;;
+                3) INSTALL_TYPE="user" ;;
+                *) echo "unrecognized choice; using defaults" ;;
+            esac
+            ;;
+        2)
+            printf '[location]: '
+            read -r LOCATION < /dev/tty || LOCATION=""
+            ;;
+        "" ) : ;;  # enter => defaults
+        *) echo "unrecognized choice; using defaults" ;;
+    esac
+fi
+
+# Resolve the binary destination directory.
+if [ -n "$LOCATION" ]; then
+    BIN_DIR="$LOCATION"
+elif [ "$INSTALL_TYPE" = "global" ]; then
+    BIN_DIR="/usr/local/bin"
+else
+    BIN_DIR="$HOME/.local/bin"
+fi
+# The helper always lands in the system prefix (it must be root-owned setuid).
+HELPER_DIR="/usr/local/bin"
+WANT_HELPER=0
+[ "$INSTALL_TYPE" = "global" ] && WANT_HELPER=1
+[ "$INSTALL_TYPE" = "user+helper" ] && WANT_HELPER=1
+
+# --- download ----------------------------------------------------------------
 case "$CHANNEL" in
     stable) URL="https://github.com/$OWNER/$REPO/releases/latest/download/$ASSET" ;;
     dev) URL="https://github.com/$OWNER/$REPO/releases/download/dev/$ASSET" ;;
     beta)
         TAG="$(curl -fsSL "https://api.github.com/repos/$OWNER/$REPO/releases?per_page=30" \
-            | grep -o '"tag_name": *"[^"]*beta[^"]*"' \
-            | head -1 \
+            | grep -o '"tag_name": *"[^"]*beta[^"]*"' | head -1 \
             | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')"
         [ -n "$TAG" ] || { echo "no beta release is available yet" >&2; exit 1; }
         URL="https://github.com/$OWNER/$REPO/releases/download/$TAG/$ASSET"
@@ -71,40 +109,73 @@ esac
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-
+echo
 echo "pulse: downloading $ASSET ($CHANNEL)..."
 curl -fSL "$URL" -o "$TMP/$ASSET"
 tar -C "$TMP" -xzf "$TMP/$ASSET"
 [ -f "$TMP/pulse" ] || { echo "release archive did not contain 'pulse'" >&2; exit 1; }
 chmod +x "$TMP/pulse"
 
-# Record the install mode so the installed binary defaults to it. Written to the
-# invoking user's ~/.pulse/config (not root's, when we escalated via sudo).
-record_mode() {
-    local home
-    home="$(eval echo "~${SUDO_USER:-$USER}")"
-    install -d "$home/.pulse"
-    printf 'install_mode = "%s"\n' "$1" > "$home/.pulse/config"
-    [ -n "${SUDO_USER:-}" ] && chown "$SUDO_USER" "$home/.pulse/config" "$home/.pulse" 2>/dev/null || true
+# install <mode> <owner-or-empty> <src> <dest-dir> — uses sudo when the target
+# isn't writable; if root is needed but unavailable, fails the caller.
+place() {
+    local mode="$1" owner="$2" src="$3" dir="$4"
+    if [ -w "$dir" ] || { [ ! -e "$dir" ] && [ -w "$(dirname "$dir")" ]; }; then
+        install -d "$dir"
+        install -m "$mode" "$src" "$dir/$(basename "$src")"
+    elif command -v sudo >/dev/null 2>&1; then
+        sudo install -d "$dir"
+        if [ -n "$owner" ]; then
+            sudo install -o "$owner" -m "$mode" "$src" "$dir/$(basename "$src")"
+        else
+            sudo install -m "$mode" "$src" "$dir/$(basename "$src")"
+        fi
+    else
+        return 1
+    fi
 }
 
-if [ "$MODE" = "user" ]; then
-    DEST="$HOME/.local/bin/pulse"
-    install -d "$HOME/.local/bin"
-    install -m 0755 "$TMP/pulse" "$DEST"
-    record_mode user
-    echo
-    echo "Installed $DEST (user mode)"
-    echo 'Make sure ~/.local/bin is on your PATH:'
-    echo '    export PATH="$HOME/.local/bin:$PATH"'
+record_mode() {
+    local mode_name="$1" home
+    home="$(eval echo "~${SUDO_USER:-$USER}")"
+    install -d "$home/.pulse"
+    printf 'install_mode = "%s"\n' "$mode_name" > "$home/.pulse/config"
+}
+
+# --- install pulse -----------------------------------------------------------
+if [ "$INSTALL_TYPE" = "global" ]; then
+    if ! place 0755 root "$TMP/pulse" "$BIN_DIR"; then
+        echo "pulse: no root available for a global install — falling back to ~/.local/bin" >&2
+        INSTALL_TYPE="user"; WANT_HELPER=0; BIN_DIR="$HOME/.local/bin"
+        place 0755 "" "$TMP/pulse" "$BIN_DIR"
+    fi
 else
-    DEST="/usr/local/bin/pulse"
-    install -d /usr/local/bin
-    # mode 4755: setuid + rwxr-xr-x, owned by root.
-    install -o root -m 4755 "$TMP/pulse" "$DEST"
-    record_mode system
-    echo
-    echo "Installed $DEST (system mode, setuid-root)"
-    echo 'Make sure ~/.local/bin is on your PATH for --as-user installs:'
-    echo '    export PATH="$HOME/.local/bin:$PATH"'
+    place 0755 "" "$TMP/pulse" "$BIN_DIR"
 fi
+
+# --- install the setuid helper (best-effort) ---------------------------------
+if [ "$WANT_HELPER" -eq 1 ]; then
+    if [ -f "$TMP/pulse-helper" ]; then
+        chmod +x "$TMP/pulse-helper"
+        if place 4755 root "$TMP/pulse-helper" "$HELPER_DIR"; then
+            echo "pulse: installed setuid helper at $HELPER_DIR/pulse-helper"
+        else
+            echo "pulse: could not install the helper (needs root); skipping" >&2
+        fi
+    else
+        echo "pulse: this release has no helper binary; skipping helper" >&2
+    fi
+fi
+
+# --- record mode + finish ----------------------------------------------------
+case "$INSTALL_TYPE" in
+    global) record_mode system ;;
+    *) record_mode user ;;
+esac
+
+echo
+echo "Installed $BIN_DIR/pulse"
+case ":$PATH:" in
+    *":$BIN_DIR:"*) : ;;
+    *) echo "Add $BIN_DIR to your PATH:"; echo "    export PATH=\"$BIN_DIR:\$PATH\"" ;;
+esac
