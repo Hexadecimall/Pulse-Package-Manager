@@ -1,0 +1,115 @@
+name: release
+
+# Publishes prebuilt binaries so users can install/update without building.
+#
+#   stable : push a tag like v1.2.3          -> a normal release
+#   beta   : push a tag like v1.2.3-beta.1   -> a prerelease
+#   dev    : every push to main              -> the rolling "dev" prerelease
+#
+# `pulse --update {stable|beta|dev}` downloads the asset named
+# pulse-<os>-<arch> for the running platform.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            asset: pulse-macos-arm64
+            ext: tar.gz
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            asset: pulse-macos-x64
+            ext: tar.gz
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            asset: pulse-linux-x64
+            ext: tar.gz
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            asset: pulse-linux-arm64
+            ext: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            asset: pulse-windows-x64
+            ext: zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross linker (linux arm64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }} -p pulse-cli -p pulse-helper
+
+      - name: Package (unix)
+        if: matrix.ext == 'tar.gz'
+        run: |
+          mkdir -p dist
+          tar -C target/${{ matrix.target }}/release -czf dist/${{ matrix.asset }}.tar.gz pulse pulse-helper
+
+      - name: Package (windows)
+        if: matrix.ext == 'zip'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive -Path target/${{ matrix.target }}/release/pulse.exe -DestinationPath dist/${{ matrix.asset }}.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}.${{ matrix.ext }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+            PRERELEASE=""
+            if [[ "$TAG" == *beta* || "$TAG" == *rc* ]]; then PRERELEASE="--prerelease"; fi
+            gh release create "$TAG" $PRERELEASE --title "$TAG" --notes "Pulse $TAG" \
+              --repo "$GITHUB_REPOSITORY" dist/* || \
+            gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            # push to main -> move the rolling dev prerelease to this commit
+            gh release delete dev --cleanup-tag --yes --repo "$GITHUB_REPOSITORY" || true
+            gh release create dev --prerelease --target "$GITHUB_SHA" \
+              --title "dev" --notes "Rolling development build" \
+              --repo "$GITHUB_REPOSITORY" dist/*
+          fi
