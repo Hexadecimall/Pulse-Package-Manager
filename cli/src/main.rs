@@ -13,10 +13,6 @@ use std::str::FromStr;
     about = "One command to install software on any platform"
 )]
 struct Cli {
-    /// Update Pulse itself. Optionally pick a channel: stable, beta, or dev
-    #[arg(long, value_name = "CHANNEL", num_args = 0..=1, default_missing_value = "")]
-    update: Option<String>,
-
     /// Operate system-wide (system paths; needs root or a setuid install)
     #[arg(long, global = true)]
     as_root: bool,
@@ -51,8 +47,11 @@ enum Command {
     Search { query: String },
     /// List everything Pulse has installed
     List,
-    /// Update one package, or all of them
-    Update { package: Option<String> },
+    /// Refresh the package list, or update Pulse itself with `update self`
+    Update {
+        #[command(subcommand)]
+        what: Option<UpdateWhat>,
+    },
     /// Show details about a package
     Info { package: String },
     /// Show which platforms (package sources) were detected on this machine
@@ -74,6 +73,13 @@ enum Command {
 }
 
 #[derive(Subcommand)]
+enum UpdateWhat {
+    /// Update Pulse itself (optionally: stable, beta, or dev)
+    #[command(name = "self")]
+    SelfUpdate { channel: Option<String> },
+}
+
+#[derive(Subcommand)]
 enum DevCommand {
     /// Write a template package manifest to <name>.json
     New { name: String },
@@ -90,32 +96,6 @@ fn main() -> Result<()> {
         mode::set(Mode::System);
     } else if cli.as_user {
         mode::set(Mode::User);
-    }
-
-    // `--update [channel]` is a top-level action, separate from the package
-    // `update` subcommand (which updates installed packages).
-    if let Some(channel_arg) = cli.update {
-        let channel = if channel_arg.is_empty() {
-            None
-        } else {
-            Some(Channel::from_str(&channel_arg)?)
-        };
-        let outcome = update::self_update(channel)?;
-        if outcome.already_current {
-            println!(
-                "Pulse is already up to date on {} ({}).",
-                outcome.channel.as_str(),
-                outcome.tag
-            );
-        } else {
-            println!(
-                "Updated Pulse to {} [{}] at {}",
-                outcome.tag,
-                outcome.channel.as_str(),
-                outcome.path.display()
-            );
-        }
-        return Ok(());
     }
 
     let Some(command) = cli.command else {
@@ -164,20 +144,33 @@ fn main() -> Result<()> {
                 println!("{}  {}  [{}]", p.name, version, p.source);
             }
         }
-        Command::Update { package } => match package {
-            Some(p) => {
-                let pkg = ops::update(&p)?;
-                let version = pkg.version.as_deref().unwrap_or("");
-                println!("Updated {} {} [{}]", pkg.name, version, pkg.source);
-            }
+        Command::Update { what } => match what {
+            // `pulse update` — refresh the package list from each platform.
             None => {
-                let failures = ops::update_all()?;
-                if failures.is_empty() {
-                    println!("Everything is up to date.");
+                let refreshed = ops::refresh()?;
+                if refreshed.is_empty() {
+                    println!("No platforms with a remote list to refresh yet.");
                 } else {
-                    for (name, err) in failures {
-                        eprintln!("failed to update {name}: {err}");
-                    }
+                    println!("Refreshed package lists: {}", refreshed.join(", "));
+                }
+            }
+            // `pulse update self [channel]` — update Pulse itself.
+            Some(UpdateWhat::SelfUpdate { channel }) => {
+                let channel = channel.map(|c| Channel::from_str(&c)).transpose()?;
+                let outcome = update::self_update(channel)?;
+                if outcome.already_current {
+                    println!(
+                        "Pulse is already up to date on {} ({}).",
+                        outcome.channel.as_str(),
+                        outcome.tag
+                    );
+                } else {
+                    println!(
+                        "Updated Pulse to {} [{}] at {}",
+                        outcome.tag,
+                        outcome.channel.as_str(),
+                        outcome.path.display()
+                    );
                 }
             }
         },
@@ -210,22 +203,106 @@ fn main() -> Result<()> {
             println!("{:<10} available", "direct");
             println!("{:<10} available", "registry");
         }
-        Command::Doctor => {
-            paths::ensure()?;
-            println!("Mode:       {}", mode::current().as_str());
-            println!("Pulse home: {}", paths::home()?.display());
-            println!("Install to: {}", paths::bin_dir()?.display());
-            let registry = Registry::all();
-            let available = registry.available();
-            if available.is_empty() {
-                println!("No native OS source detected. Direct and registry installs still work.");
-            } else {
-                let names: Vec<&str> = available.iter().map(|b| b.name()).collect();
-                println!("Detected platforms: {}", names.join(", "));
-            }
-        }
+        Command::Doctor => doctor()?,
         Command::Settings { key, value } => settings(key, value)?,
         Command::Dev { command } => dev(command)?,
+    }
+    Ok(())
+}
+
+/// Real environment diagnosis: check the things that actually break installs
+/// and report each with a fix.
+fn doctor() -> Result<()> {
+    use std::path::Path;
+    paths::ensure().ok();
+
+    println!("Mode:       {}", mode::current().as_str());
+    println!("Pulse home: {}", paths::home()?.display());
+    let bin = paths::bin_dir()?;
+    println!("Install to: {}", bin.display());
+    println!();
+
+    let mut problems = 0u32;
+    let mut check = |ok: bool, label: &str, fix: &str| {
+        if ok {
+            println!("  [ok]   {label}");
+        } else {
+            println!("  [warn] {label} — {fix}");
+            problems += 1;
+        }
+    };
+
+    // Pulse's state dir must be writable.
+    let home_ok = paths::home().map(|h| paths::is_writable(&h)).unwrap_or(false);
+    check(home_ok, "Pulse home is writable", "check permissions on ~/.pulse");
+
+    // The bin dir must be on PATH or installs won't be found.
+    let on_path = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+        .any(|p| p == bin);
+    check(
+        on_path,
+        &format!("{} is on your PATH", bin.display()),
+        &format!("add: export PATH=\"{}:$PATH\"", bin.display()),
+    );
+
+    // In system mode the setuid helper should be installed.
+    #[cfg(unix)]
+    if mode::current() == Mode::System {
+        let helper = paths::helper_path();
+        check(
+            helper.exists(),
+            "setuid helper is installed",
+            "reinstall as root so the helper is deployed",
+        );
+    }
+
+    // No install should point at a binary that's gone missing.
+    let db = ops::installed()?;
+    let broken: Vec<String> = db
+        .iter()
+        .filter(|p| {
+            p.path
+                .as_deref()
+                .map(|path| !Path::new(path).exists())
+                .unwrap_or(false)
+        })
+        .map(|p| p.name.clone())
+        .collect();
+    check(
+        broken.is_empty(),
+        "no broken installs",
+        &format!("missing binaries: {} — reinstall or uninstall them", broken.join(", ")),
+    );
+
+    // At least detect a native platform (direct/registry always work anyway).
+    let registry = Registry::all();
+    let available: Vec<&str> = registry.available().iter().map(|b| b.name()).collect();
+    check(
+        !available.is_empty(),
+        "a native platform was detected",
+        "none found; direct and registry installs still work",
+    );
+
+    // Network reachability.
+    check(
+        pulse::networking::reachable("https://github.com"),
+        "network reachable (github.com)",
+        "check your internet connection",
+    );
+
+    println!();
+    println!(
+        "Detected platforms: {}",
+        if available.is_empty() {
+            "(none)".to_string()
+        } else {
+            available.join(", ")
+        }
+    );
+    if problems == 0 {
+        println!("No problems found.");
+    } else {
+        println!("{problems} problem(s) found.");
     }
     Ok(())
 }

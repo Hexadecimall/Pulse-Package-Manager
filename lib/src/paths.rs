@@ -140,7 +140,7 @@ pub fn ensure() -> Result<()> {
 
 /// Whether Pulse can create and write files under `dir` (checking the nearest
 /// existing ancestor when `dir` itself doesn't exist yet).
-fn is_writable(dir: &Path) -> bool {
+pub fn is_writable(dir: &Path) -> bool {
     if std::fs::create_dir_all(dir).is_err() {
         return false;
     }

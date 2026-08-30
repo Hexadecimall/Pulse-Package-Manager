@@ -34,7 +34,8 @@ pulse install <package>          # install, via a platform or directly
 pulse uninstall <package>        # uninstall
 pulse search <query>             # search across available platforms
 pulse list                       # everything Pulse has installed
-pulse update [package]           # update one package, or all of them
+pulse update                     # refresh the package list
+pulse update self [branch]       # update Pulse itself (stable/beta/dev)
 pulse info <package>             # details about a package
 pulse platforms                  # show which platforms were detected here
 pulse settings [key] [value]     # view/change mode, channel, default-platform
@@ -48,7 +49,7 @@ Two global options:
   (`/usr/local/bin`, needs root) or in your home (`~/.local/bin`, no root). The
   default follows how Pulse was installed; a system-mode operation that can't
   write its target falls back to `~/.local/bin` automatically.
-- `--update [stable|beta|dev]` updates Pulse itself (see below).
+- `pulse update self [branch]` updates Pulse itself (see below).
 
 ## How it's laid out
 
@@ -94,14 +95,14 @@ skip the menu and take the defaults. On Windows, run `install.ps1` instead
 Pulse updates itself from its own releases — three channels:
 
 ```
-pulse --update           # your current channel (stable by default)
-pulse --update stable    # thoroughly tested, fastest, most secure
-pulse --update beta      # confirmed features, lightly tested
-pulse --update dev       # newest, experimental
+pulse update self           # your current channel (stable by default)
+pulse update self stable    # thoroughly tested, fastest, most secure
+pulse update self beta      # confirmed features, lightly tested
+pulse update self dev       # newest, experimental
 ```
 
-`--as-user` works here too: `pulse --update dev --as-user` updates the copy in
-`~/.local/bin` instead of the system one.
+`--as-user` works here too: `pulse update self dev --as-user` updates the copy
+in `~/.local/bin` instead of the system one.
 
 ## Building from source
 

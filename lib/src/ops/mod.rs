@@ -141,6 +141,19 @@ pub fn info(name: &str) -> Result<Option<InstalledPackage>> {
     Ok(Db::load()?.get(name).cloned())
 }
 
+/// Refresh the package list of every available platform. Returns the names of
+/// the platforms that actually refreshed something.
+pub fn refresh() -> Result<Vec<String>> {
+    let registry = Registry::all();
+    let mut refreshed = Vec::new();
+    for platform in registry.available() {
+        if platform.refresh().unwrap_or(false) {
+            refreshed.push(platform.name().to_string());
+        }
+    }
+    Ok(refreshed)
+}
+
 /// Everything Pulse has on record as installed.
 pub fn installed() -> Result<Db> {
     Db::load()

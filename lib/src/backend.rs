@@ -45,6 +45,13 @@ pub trait Backend {
     fn update(&self, package: &str) -> Result<InstalledPackage> {
         self.install(package)
     }
+
+    /// Refresh this platform's cached package list. Returns whether anything
+    /// was refreshed. Defaults to a no-op (`false`) for platforms that resolve
+    /// on demand and keep no local index yet.
+    fn refresh(&self) -> Result<bool> {
+        Ok(false)
+    }
 }
 
 /// Look up an executable on `PATH` without spawning a process — the native

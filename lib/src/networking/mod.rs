@@ -36,6 +36,17 @@ pub fn download_with_headers(url: &str, dest: &Path, headers: &[(String, String)
     Ok(())
 }
 
+/// Quick reachability check (a HEAD with a short timeout) for `doctor`.
+pub fn reachable(url: &str) -> bool {
+    reqwest::blocking::Client::builder()
+        .user_agent(concat!("pulse/", env!("CARGO_PKG_VERSION")))
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .and_then(|c| c.head(url).send())
+        .map(|r| r.status().is_success() || r.status().is_redirection())
+        .unwrap_or(false)
+}
+
 /// Fetch a URL and parse the response as JSON.
 pub fn get_json(url: &str) -> Result<serde_json::Value> {
     client()?
