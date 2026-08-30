@@ -70,15 +70,15 @@ enum Command {
         #[command(subcommand)]
         command: DevCommand,
     },
-    /// Run an installed package through Wine (Windows executables)
-    #[command(name = "wine-run")]
-    WineRun {
-        /// The installed package to run
-        package: String,
-        /// Explicit path to libwine (otherwise common locations are tried)
-        #[arg(long)]
-        wine_lib: Option<String>,
-    },
+    // /// Run an installed package through Wine (Windows executables)
+    // #[command(name = "wine-run")]
+    // WineRun {
+    //     /// The installed package to run
+    //     package: String,
+    //     /// Explicit path to libwine (otherwise common locations are tried)
+    //     #[arg(long)]
+    //     wine_lib: Option<String>,
+    // },
 }
 
 #[derive(Subcommand)]
@@ -215,19 +215,19 @@ fn main() -> Result<()> {
         Command::Doctor => doctor()?,
         Command::Settings { key, value } => settings(key, value)?,
         Command::Dev { command } => dev(command)?,
-        Command::WineRun { package, wine_lib } => {
-            let db = ops::installed()?;
-            let record = db
-                .get(&package)
-                .with_context(|| format!("'{package}' isn't installed"))?;
-            let path = record
-                .path
-                .as_deref()
-                .with_context(|| format!("'{package}' has no recorded binary path"))?;
-            let lib = wine_lib.or_else(|| std::env::var("PULSE_WINE_LIB").ok());
-            println!("Running {path} through Wine...");
-            pulse::wine::run(std::path::Path::new(path), lib.as_deref())?;
-        }
+        // Command::WineRun { package, wine_lib } => {
+        //     let db = ops::installed()?;
+        //     let record = db
+        //         .get(&package)
+        //         .with_context(|| format!("'{package}' isn't installed"))?;
+        //     let path = record
+        //         .path
+        //         .as_deref()
+        //         .with_context(|| format!("'{package}' has no recorded binary path"))?;
+        //     let lib = wine_lib.or_else(|| std::env::var("PULSE_WINE_LIB").ok());
+        //     println!("Running {path} through Wine...");
+        //     pulse::wine::run(std::path::Path::new(path), lib.as_deref())?;
+        // }
     }
     Ok(())
 }
