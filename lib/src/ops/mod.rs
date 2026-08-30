@@ -2,10 +2,11 @@
 //! available on the current machine, and keep the install database in sync.
 //! This is the surface the command-line front end calls into.
 
-use crate::backend::{Package, Registry};
+use crate::backend::{Backend, Package, Registry};
 use crate::config::Config;
 use crate::db::{Db, InstalledPackage};
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
+use std::collections::HashSet;
 
 /// Options controlling how [`install`] chooses a platform.
 #[derive(Debug, Default)]
@@ -26,9 +27,13 @@ fn looks_direct(target: &str) -> bool {
 
 /// Install a package, recording it in the database on success.
 ///
-/// Platform choice: an explicit `--platform`, else the configured
-/// `default_platform`, else the one native to this machine. A URL or
-/// `owner/repo` target (or `--direct`) always uses the direct installer.
+/// A URL or `owner/repo` target (or `--direct`) always uses the direct
+/// installer. An explicit `--platform` forces one source. Otherwise Pulse
+/// resolves the package against whatever platform actually *has* it: the
+/// configured default and the native sources first, then non-native ones — so a
+/// package only MacPorts carries comes from MacPorts, not Homebrew. Installing
+/// from a non-native source warns that the download may not run on this kernel,
+/// then proceeds anyway.
 pub fn install(target: &str, opts: &InstallOptions) -> Result<InstalledPackage> {
     let registry = Registry::all();
 
@@ -41,23 +46,80 @@ pub fn install(target: &str, opts: &InstallOptions) -> Result<InstalledPackage> 
         let platform = registry
             .get(name)
             .with_context(|| format!("unknown platform '{name}'"))?;
-        platform.install(target)?
-    } else if let Some(name) = Config::load().ok().and_then(|c| c.default_platform) {
-        let platform = registry
-            .get(&name)
-            .with_context(|| format!("configured default-platform '{name}' is unknown"))?;
-        platform.install(target)?
+        let record = platform.install(target)?;
+        warn_if_alternative(platform.as_ref(), &registry);
+        record
     } else {
-        let platform = registry
-            .primary()
-            .context("no package source was detected on this system")?;
-        platform.install(target)?
+        install_from_any(&registry, target)?
     };
 
     let mut db = Db::load()?;
     db.record(record.clone());
     db.save()?;
     Ok(record)
+}
+
+/// Try each platform in preference order until one has the package. Native
+/// sources (and the configured default) come first; non-native ones are tried
+/// last. On success, warns if the source is an alternative or non-native.
+fn install_from_any(registry: &Registry, target: &str) -> Result<InstalledPackage> {
+    let mut errors = Vec::new();
+    for name in resolution_order(registry) {
+        let Some(platform) = registry.get(&name) else {
+            continue;
+        };
+        match platform.install(target) {
+            Ok(record) => {
+                warn_if_alternative(platform.as_ref(), registry);
+                return Ok(record);
+            }
+            Err(e) => errors.push(format!("{name}: {e:#}")),
+        }
+    }
+    if errors.is_empty() {
+        bail!("no package source was detected on this system");
+    }
+    bail!("no platform had '{target}':\n  {}", errors.join("\n  "));
+}
+
+/// Platform names to try, in order: the configured default, then the native
+/// (available) sources, then the non-native ones — deduplicated.
+fn resolution_order(registry: &Registry) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut seen = HashSet::new();
+    let mut push = |name: String| {
+        if seen.insert(name.clone()) {
+            names.push(name);
+        }
+    };
+    if let Some(default) = Config::load().ok().and_then(|c| c.default_platform) {
+        push(default);
+    }
+    for b in registry.available() {
+        push(b.name().to_string());
+    }
+    for b in registry.backends() {
+        if !b.is_available() {
+            push(b.name().to_string());
+        }
+    }
+    names
+}
+
+/// Warn when a package was installed from a non-native source (may not run on
+/// this kernel) or an alternative to the default one.
+fn warn_if_alternative(platform: &dyn Backend, registry: &Registry) {
+    if !platform.is_available() {
+        eprintln!(
+            "warning: '{}' isn't native to this system — the download may not run on your kernel. Installing anyway.",
+            platform.name()
+        );
+    } else if registry.primary().map(|p| p.name()) != Some(platform.name()) {
+        eprintln!(
+            "note: installed from alternative source '{}'.",
+            platform.name()
+        );
+    }
 }
 
 /// Remove a package. If Pulse installed it, the recorded backend does the
