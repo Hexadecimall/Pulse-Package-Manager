@@ -197,34 +197,6 @@ if [ "$WANT_HELPER" -eq 1 ]; then
     fi
 fi
 
-# --- fetch a Wine bundle for wine-run ----------------------------------------
-# wine-run needs a *full* Wine install (a lone libwine can't run anything — it
-# needs its ntdll/loader siblings). Install one into Pulse's lib dir under
-# `wine/`, where wine-run looks. Source: PULSE_WINE_URL, or a pulse-wine release
-# asset. Best-effort — if none is available, wine-run falls back to any Wine
-# already on the system (Homebrew, /Applications, WineHQ, PULSE_WINE_ROOT).
-if [ "$INSTALL_TYPE" = "user" ]; then
-    LIB_DIR="$HOME/.pulse/lib"
-else
-    LIB_DIR="$SYS_LIB"
-fi
-WINE_DIR="$LIB_DIR/wine"
-WINE_URL="${PULSE_WINE_URL:-https://github.com/$OWNER/$REPO/releases/latest/download/pulse-wine-${OS}-${ARCH}.tar.gz}"
-
-if curl -fsSL "$WINE_URL" -o "$TMP/wine.tar.gz" 2>/dev/null; then
-    if [ -w "$(dirname "$WINE_DIR")" ] 2>/dev/null || [ "$INSTALL_TYPE" = "user" ]; then
-        mkdir -p "$WINE_DIR"
-        tar -C "$WINE_DIR" -xzf "$TMP/wine.tar.gz"
-    elif command -v sudo >/dev/null 2>&1; then
-        sudo mkdir -p "$WINE_DIR"
-        sudo tar -C "$WINE_DIR" -xzf "$TMP/wine.tar.gz"
-    fi
-    echo "pulse: installed Wine bundle to $WINE_DIR"
-else
-    echo "pulse: no Wine bundle fetched — wine-run will use a Wine already installed" >&2
-    echo "       on the system, or set PULSE_WINE_URL to a Wine bundle." >&2
-fi
-
 # --- record mode + finish ----------------------------------------------------
 case "$INSTALL_TYPE" in
     global) record_mode system ;;
