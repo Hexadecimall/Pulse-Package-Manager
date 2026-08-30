@@ -65,7 +65,7 @@ LOCATION=""   # empty => the default for the chosen type
 have_tty() { [ -e /dev/tty ]; }
 
 if [ "$ASSUME_YES" -eq 0 ] && have_tty; then
-    echo "Welcome to setup for pulse!"
+    echo "Welcome to the Pulse installer!"
     echo "Press enter to go ahead and use default settings and press a number to modify settings!"
     echo
     echo "[1] User-mode settings"
@@ -128,7 +128,11 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 echo
 echo "pulse: downloading $ASSET ($CHANNEL)..."
-curl -fSL "$URL" -o "$TMP/$ASSET"
+if ! curl -fsSL "$URL" -o "$TMP/$ASSET"; then
+    echo "pulse: couldn't download $ASSET — there may be no '$CHANNEL' release published yet." >&2
+    echo "       Try a different channel, e.g. 'install.sh dev'." >&2
+    exit 1
+fi
 tar -C "$TMP" -xzf "$TMP/$ASSET"
 [ -f "$TMP/pulse" ] || { echo "release archive did not contain 'pulse'" >&2; exit 1; }
 chmod +x "$TMP/pulse"
