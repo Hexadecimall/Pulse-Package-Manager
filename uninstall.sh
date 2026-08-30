@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 #
 # Uninstall Pulse. Detects whether Pulse was installed system-wide or per-user
-# and removes that one — only the specific `pulse` (and, for a system install,
-# `pulse-helper`) files. It never recursively deletes a system directory.
+# and removes the `pulse` binary (and, for a system install, `pulse-helper`).
 #
-# Pass --purge to also delete ~/.pulse (Pulse's own config + install database).
-# Uses sudo only when a system path isn't writable.
+# --purge additionally removes every file Pulse recorded installing — read from
+# ~/.pulse/db.json, so only the exact files Pulse added (wherever they are,
+# including things it placed in /usr/lib) are removed — and then ~/.pulse itself.
+#
+# Only specific files are ever deleted. This never does `rm -rf` on a shared
+# system directory.
 #
 # Usage:  ./uninstall.sh [--purge]
 #
@@ -53,7 +56,8 @@ fi
 # Remove a single file, with sudo only if its directory isn't writable.
 remove_file() {
     local p="$1"
-    [ -e "$p" ] || { echo "not found: $p"; return 0; }
+    [ -n "$p" ] || return 0
+    [ -e "$p" ] || return 0
     if [ -w "$(dirname "$p")" ]; then
         rm -f "$p"
     elif command -v sudo >/dev/null 2>&1; then
@@ -73,13 +77,25 @@ else
     remove_file "$USER_BIN"
 fi
 
-if [ "$PURGE" -eq 1 ] && [ -d "$HOME/.pulse" ]; then
-    rm -rf "$HOME/.pulse"
-    echo "removed $HOME/.pulse"
+if [ "$PURGE" -eq 1 ]; then
+    DB="$HOME/.pulse/db.json"
+    if [ -f "$DB" ]; then
+        echo "pulse: removing the files Pulse installed..."
+        # Each recorded install's "path" — remove exactly those files, nothing else.
+        grep -oE '"path"[[:space:]]*:[[:space:]]*"[^"]+"' "$DB" \
+            | sed -E 's/.*"([^"]+)"$/\1/' \
+            | while IFS= read -r f; do
+                remove_file "$f"
+            done
+    fi
+    if [ -d "$HOME/.pulse" ]; then
+        rm -rf "$HOME/.pulse"   # Pulse's own home directory
+        echo "removed $HOME/.pulse"
+    fi
 fi
 
 echo
 echo "Pulse uninstalled."
 if [ "$PURGE" -eq 0 ]; then
-    echo "(Kept ~/.pulse and anything Pulse installed; run with --purge to remove ~/.pulse.)"
+    echo "(Kept ~/.pulse and the packages Pulse installed; run with --purge to remove them.)"
 fi
