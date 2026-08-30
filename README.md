@@ -40,6 +40,7 @@ pulse info <package>             # details about a package
 pulse platforms                  # show which platforms were detected here
 pulse settings [key] [value]     # view/change mode, channel, default-platform
 pulse dev new|check              # author/validate registry manifests
+pulse wine-run <package>         # run an installed Windows package via libwine
 pulse doctor                     # check the environment and report problems
 ```
 

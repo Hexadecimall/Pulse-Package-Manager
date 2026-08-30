@@ -797,6 +797,7 @@ name = "pulse"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "cc",
  "dirs",
  "flate2",
  "libc",

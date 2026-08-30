@@ -16,6 +16,7 @@ pub mod paths;
 pub mod platform;
 pub mod process;
 pub mod update;
+pub mod wine;
 
 pub mod apt;
 pub mod direct;
