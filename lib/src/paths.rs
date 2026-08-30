@@ -120,6 +120,24 @@ pub fn bin_dir() -> Result<PathBuf> {
     }
 }
 
+/// Where Pulse keeps its own support libraries (e.g. a bundled libwine) for the
+/// current mode: the system `lib` dir in system mode, `~/.pulse/lib` in user
+/// mode. A system target that isn't writable falls back to the user one.
+#[cfg(unix)]
+pub fn lib_dir() -> Result<PathBuf> {
+    match mode::current() {
+        Mode::User => Ok(home()?.join("lib")),
+        Mode::System => {
+            let sys = system_lib_dir();
+            if is_writable(&sys) {
+                Ok(sys)
+            } else {
+                Ok(home()?.join("lib"))
+            }
+        }
+    }
+}
+
 /// `~/.pulse/config` — user settings (TOML).
 pub fn config_file() -> Result<PathBuf> {
     Ok(home()?.join("config"))
