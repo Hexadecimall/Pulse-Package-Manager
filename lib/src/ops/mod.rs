@@ -2,10 +2,12 @@
 //! available on the current machine, and keep the install database in sync.
 //! This is the surface the command-line front end calls into.
 
-use crate::backend::{Backend, Package, Registry};
+use crate::backend::{Backend, Describe, Package, Registry};
 use crate::config::Config;
 use crate::db::{Db, InstalledPackage};
+use crate::progress::Spinner;
 use anyhow::{Context, Result, bail};
+use colored::Colorize;
 use std::collections::HashSet;
 
 /// Options controlling how [`install`] chooses a platform.
@@ -41,14 +43,14 @@ pub fn install(target: &str, opts: &InstallOptions) -> Result<InstalledPackage> 
         || opts.direct
         || (opts.platform.is_none() && looks_direct(target))
     {
-        registry.direct().install_spec(target, opts.name.as_deref())?
+        install_direct(&registry, target, opts.name.as_deref())?
     } else if let Some(name) = &opts.platform {
-        let platform = registry
+        // Explicit platform: describe it if we can (for the summary), then install.
+        let info = registry
             .get(name)
-            .with_context(|| format!("unknown platform '{name}'"))?;
-        let record = platform.install(target)?;
-        warn_if_alternative(platform.as_ref(), &registry);
-        record
+            .and_then(|p| p.describe(target).ok())
+            .unwrap_or_default();
+        install_described(&registry, target, name, &info)?
     } else {
         install_from_any(&registry, target)?
     };
@@ -59,27 +61,95 @@ pub fn install(target: &str, opts: &InstallOptions) -> Result<InstalledPackage> 
     Ok(record)
 }
 
-/// Try each platform in preference order until one has the package. Native
-/// sources (and the configured default) come first; non-native ones are tried
-/// last. On success, warns if the source is an alternative or non-native.
+/// The direct installer, with a clean spinner + success line.
+fn install_direct(registry: &Registry, target: &str, name: Option<&str>) -> Result<InstalledPackage> {
+    let spinner = Spinner::start(format!("Downloading {target}…"));
+    let result = registry.direct().install_spec(target, name);
+    spinner.stop();
+    let record = result?;
+    println!();
+    println!("{}", format!("Successfully installed {}!", record.name).bold().green());
+    Ok(record)
+}
+
+/// Resolve against whatever platform actually has the package (native + default
+/// first, then non-native), then install it — with the styled summary.
 fn install_from_any(registry: &Registry, target: &str) -> Result<InstalledPackage> {
+    let spinner = Spinner::start("Reading package lists…");
     let mut errors = Vec::new();
+    let mut chosen = None;
     for name in resolution_order(registry) {
         let Some(platform) = registry.get(&name) else {
             continue;
         };
-        match platform.install(target) {
-            Ok(record) => {
-                warn_if_alternative(platform.as_ref(), registry);
-                return Ok(record);
+        match platform.describe(target) {
+            Ok(info) => {
+                chosen = Some((name, info));
+                break;
             }
             Err(e) => errors.push(format!("{name}: {e:#}")),
         }
     }
-    if errors.is_empty() {
-        bail!("no package source was detected on this system");
+    spinner.stop();
+
+    let Some((name, info)) = chosen else {
+        if errors.is_empty() {
+            bail!("no package source was detected on this system");
+        }
+        bail!("no platform has '{target}':\n  {}", errors.join("\n  "));
+    };
+    install_described(registry, target, &name, &info)
+}
+
+/// Print the styled summary and install `target` from `platform_name`, using
+/// the already-known [`Describe`] info.
+fn install_described(
+    registry: &Registry,
+    target: &str,
+    platform_name: &str,
+    info: &Describe,
+) -> Result<InstalledPackage> {
+    let platform = registry
+        .get(platform_name)
+        .with_context(|| format!("unknown platform '{platform_name}'"))?;
+
+    let version = info
+        .version
+        .as_deref()
+        .map(|v| format!(" (v{v})"))
+        .unwrap_or_default();
+    println!("{} {}", "Found".bold().cyan(), target.bold());
+    println!(
+        "{} {}{} {}",
+        "Installing".bold(),
+        target.bold(),
+        version,
+        format!("[{platform_name}]").dimmed()
+    );
+
+    let spinner = Spinner::start(format!("Downloading {target}…"));
+    let result = platform.install(target);
+    spinner.stop();
+    let mut record = result?;
+
+    warn_if_alternative(platform.as_ref(), registry);
+
+    if info.dependencies.is_empty() {
+        println!("{} No dependencies", "•".green());
+    } else {
+        println!("{} Dependencies: {}", "•".green(), info.dependencies.join(", "));
     }
-    bail!("no platform had '{target}':\n  {}", errors.join("\n  "));
+    match info.caveats.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
+        None => println!("{} No caveats", "•".green()),
+        Some(c) => println!("{} Caveats:\n{}", "•".yellow(), c),
+    }
+
+    if record.version.is_none() {
+        record.version = info.version.clone();
+    }
+    println!();
+    println!("{}", format!("Successfully installed {target}!").bold().green());
+    Ok(record)
 }
 
 /// Platform names to try, in order: the configured default, then the native

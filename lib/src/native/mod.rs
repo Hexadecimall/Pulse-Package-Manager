@@ -99,21 +99,69 @@ pub fn install_package(pkg: &PackageFile) -> Result<InstalledPackage> {
     })
 }
 
-/// Remove a natively-installed binary from the bin directory.
+/// Copy `src` into place as an executable at `dest`. When the destination
+/// directory isn't directly writable (a system install running unprivileged),
+/// the privileged copy is done through the setuid helper. Falls back to an
+/// error only when neither is possible.
+pub fn place_file(src: &Path, dest: &Path) -> Result<()> {
+    let parent = dest.parent().context("destination has no parent directory")?;
+    if paths::is_writable(parent) {
+        fs::create_dir_all(parent).ok();
+        fs::copy(src, dest).with_context(|| format!("installing {}", dest.display()))?;
+        archive::set_executable(dest)?;
+        return Ok(());
+    }
+    #[cfg(unix)]
+    if paths::helper_available() {
+        let helper = paths::helper_path();
+        let status = std::process::Command::new(&helper)
+            .arg("install")
+            .arg(src)
+            .arg(dest)
+            .status()
+            .with_context(|| format!("running the setuid helper at {}", helper.display()))?;
+        if status.success() {
+            return Ok(());
+        }
+        bail!("the setuid helper failed to install {}", dest.display());
+    }
+    bail!(
+        "cannot write {} — re-run as root, or install with --as-user",
+        dest.display()
+    );
+}
+
+/// Remove a natively-installed binary from the bin directory, via the setuid
+/// helper when the directory isn't directly writable.
 pub fn remove(name: &str) -> Result<()> {
     let path = paths::bin_dir()?.join(archive::exe_name(name));
-    if path.exists() {
-        fs::remove_file(&path).with_context(|| format!("removing {}", path.display()))?;
+    if !path.exists() {
+        return Ok(());
     }
-    Ok(())
+    let parent = path.parent().context("no parent directory")?;
+    if paths::is_writable(parent) {
+        return fs::remove_file(&path).with_context(|| format!("removing {}", path.display()));
+    }
+    #[cfg(unix)]
+    if paths::helper_available() {
+        let helper = paths::helper_path();
+        let status = std::process::Command::new(&helper)
+            .arg("remove")
+            .arg(&path)
+            .status()
+            .with_context(|| format!("running the setuid helper at {}", helper.display()))?;
+        if status.success() {
+            return Ok(());
+        }
+        bail!("the setuid helper failed to remove {}", path.display());
+    }
+    bail!("cannot remove {} — re-run as root", path.display())
 }
 
 /// Install a single downloaded binary as `<bin_dir>/<name>`.
 fn install_single(src: &Path, name: &str) -> Result<PathBuf> {
     let dest = paths::bin_dir()?.join(archive::exe_name(name));
-    fs::create_dir_all(dest.parent().unwrap())?;
-    fs::copy(src, &dest).with_context(|| format!("installing {}", dest.display()))?;
-    archive::set_executable(&dest)?;
+    place_file(src, &dest)?;
     Ok(dest)
 }
 
@@ -123,7 +171,6 @@ fn install_single(src: &Path, name: &str) -> Result<PathBuf> {
 /// heuristic. Returns the path of the primary installed binary.
 fn place_tree(root: &Path, name: &str) -> Result<PathBuf> {
     let bin_dir = paths::bin_dir()?;
-    fs::create_dir_all(&bin_dir)?;
 
     let mut bin_files = Vec::new();
     collect_bin_files(root, &mut bin_files)?;
@@ -142,8 +189,7 @@ fn place_tree(root: &Path, name: &str) -> Result<PathBuf> {
             continue;
         }
         let dest = bin_dir.join(file_name);
-        fs::copy(&file, &dest).with_context(|| format!("installing {}", dest.display()))?;
-        archive::set_executable(&dest)?;
+        place_file(&file, &dest)?;
         if file_name == want || primary.is_none() {
             primary = Some(dest);
         }

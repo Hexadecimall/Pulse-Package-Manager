@@ -15,6 +15,7 @@ pub mod networking;
 pub mod paths;
 pub mod platform;
 pub mod process;
+pub mod progress;
 pub mod update;
 pub mod wine;
 
@@ -31,4 +32,4 @@ pub mod winget;
 /// High-level operations that route work across the available sources.
 pub mod ops;
 
-pub use backend::{Backend, Package, Registry};
+pub use backend::{Backend, Describe, Package, Registry};

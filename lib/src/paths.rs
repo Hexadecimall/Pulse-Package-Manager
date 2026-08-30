@@ -103,15 +103,27 @@ pub fn user_bin_dir() -> Result<PathBuf> {
     Ok(base.join("Pulse").join("bin"))
 }
 
-/// Where installed binaries go for the current run's mode. A system target that
-/// can't be written falls back to the user directory, so an unprivileged
-/// invocation still works.
+/// Whether the setuid helper is installed (so system paths can be written
+/// without being root ourselves).
+#[cfg(unix)]
+pub fn helper_available() -> bool {
+    helper_path().exists()
+}
+#[cfg(not(unix))]
+pub fn helper_available() -> bool {
+    false
+}
+
+/// Where installed binaries go for the current run's mode. In system mode the
+/// system bin dir is used when it's writable *or* the setuid helper is present
+/// (which performs the privileged write); only if neither holds do we fall back
+/// to the user directory, so an unprivileged install still works.
 pub fn bin_dir() -> Result<PathBuf> {
     match mode::current() {
         Mode::User => user_bin_dir(),
         Mode::System => {
             let sys = system_bin_dir();
-            if is_writable(&sys) {
+            if is_writable(&sys) || helper_available() {
                 Ok(sys)
             } else {
                 user_bin_dir()

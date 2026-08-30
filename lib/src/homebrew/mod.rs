@@ -10,7 +10,7 @@
 //! resolution are not done yet, so formulae with runtime dependencies on other
 //! bottles may not work until dependency handling lands.
 
-use crate::backend::{Backend, Package};
+use crate::backend::{Backend, Describe, Package};
 use crate::db::InstalledPackage;
 use crate::native::{self, PackageFile, PkgFormat};
 use crate::networking;
@@ -33,6 +33,27 @@ impl Backend for Homebrew {
 
     fn search(&self, _query: &str) -> Result<Vec<Package>> {
         bail!("homebrew search isn't implemented yet");
+    }
+
+    fn describe(&self, package: &str) -> Result<Describe> {
+        let url = format!("https://formulae.brew.sh/api/formula/{package}.json");
+        let data =
+            networking::get_json(&url).with_context(|| format!("looking up formula '{package}'"))?;
+        let version = data["versions"]["stable"].as_str().map(str::to_string);
+        let dependencies = data["dependencies"]
+            .as_array()
+            .map(|d| {
+                d.iter()
+                    .filter_map(|x| x.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let caveats = data["caveats"].as_str().map(str::to_string);
+        Ok(Describe {
+            version,
+            dependencies,
+            caveats,
+        })
     }
 
     fn install(&self, package: &str) -> Result<InstalledPackage> {

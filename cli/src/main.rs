@@ -125,9 +125,8 @@ fn main() -> Result<()> {
                 platform,
                 name,
             };
-            let pkg = ops::install(&target, &opts)?;
-            let version = pkg.version.as_deref().unwrap_or("");
-            println!("Installed {} {} [{}]", pkg.name, version, pkg.source);
+            // ops::install prints its own styled progress + result.
+            ops::install(&target, &opts)?;
         }
         Command::Uninstall { package } => {
             ops::remove(&package)?;

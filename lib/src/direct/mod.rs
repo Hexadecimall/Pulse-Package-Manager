@@ -72,9 +72,7 @@ impl Direct {
         };
 
         let dest = paths::bin_dir()?.join(archive::exe_name(&name));
-        fs::copy(&binary_src, &dest)
-            .with_context(|| format!("installing binary to {}", dest.display()))?;
-        archive::set_executable(&dest)?;
+        crate::native::place_file(&binary_src, &dest)?;
         let _ = fs::remove_dir_all(&work);
 
         Ok(InstalledPackage {

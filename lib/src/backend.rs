@@ -22,6 +22,15 @@ pub struct Package {
     pub source: String,
 }
 
+/// What a platform knows about a package before installing it — used to show a
+/// clean summary and to decide which platform actually *has* the package.
+#[derive(Debug, Default, Clone)]
+pub struct Describe {
+    pub version: Option<String>,
+    pub dependencies: Vec<String>,
+    pub caveats: Option<String>,
+}
+
 /// A source Pulse can install software from — a system package manager, or the
 /// direct-binary installer. Every backend implements the same handful of
 /// operations, so the front end never has to special-case one.
@@ -33,6 +42,13 @@ pub trait Backend {
     fn is_available(&self) -> bool;
 
     fn search(&self, query: &str) -> Result<Vec<Package>>;
+
+    /// Look a package up without installing it: confirms this platform has it
+    /// and returns its version / dependencies / caveats. Errors if the platform
+    /// doesn't carry the package. Defaults to "can't describe yet".
+    fn describe(&self, package: &str) -> Result<Describe> {
+        anyhow::bail!("{} can't look up '{package}' yet", self.name());
+    }
 
     /// Install a package and return the record to persist for it.
     fn install(&self, package: &str) -> Result<InstalledPackage>;
